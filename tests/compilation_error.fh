@@ -1,6 +1,4 @@
 
 fn main()
 {
-    let x = 0
-    let c = 3;
 }

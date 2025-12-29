@@ -694,7 +694,7 @@ static struct fh_p_expr *parse_expr(struct fh_parser *p, bool consume_stop, char
                 fh_parse_error_expected(p, p->last_loc, stop_chars);
                 goto err;
             }
-            fh_parse_error_expected(p, p->last_loc, stop_chars);
+            fh_parse_error(p, p->last_loc, "missing '%s'", stop_chars);
             goto err;
         }
 
