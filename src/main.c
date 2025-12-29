@@ -170,7 +170,7 @@ int main(int argc, char **argv) {
 
                 fh_main_file_packed = argv[++i];
                 if (!fh_main_file_packed) {
-                    /* If the user didn't explcitly tell FH which
+                    /* If the user didn't explicitly tell FH which
                      * main file to use, fallback to default, main.fh. */
                     i--;
                     fh_main_file_packed = "main.fh";
@@ -205,7 +205,7 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    int ret = -1;
+    int ret;
     if (execute_code)
         ret = fh_run_string(prog, dump_bytecode, execute_code, "main");
     else if (fh_is_packed)
@@ -218,6 +218,7 @@ int main(int argc, char **argv) {
     }
 
     fh_deinit(prog);
+
     return ret;
 }
 #endif

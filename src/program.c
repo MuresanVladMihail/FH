@@ -37,8 +37,9 @@ void fh_init() {
 void fh_deinit(struct fh_program *prog) {
     free(mt19937_generator);
 
-    if (fh_is_packed)
+    if (fh_is_packed) {
         mtar_close(&fh_tar);
+    }
 
     for (int i = 0; i < fh_dynamic_libraries.length; i++) {
         void *handle = fh_dynamic_libraries.data[i];
@@ -338,14 +339,12 @@ int fh_compile_input(struct fh_program *prog, struct fh_input *in) {
         return -1;
     }
     if (fh_parse(&prog->parser, ast, in) < 0) {
-        fh_set_error(prog, "can't parse '%s'", fh_get_input_filename(in));
         goto err;
     }
 
     // fh_dump_ast(ast);
 
     if (fh_compile(&prog->compiler, ast) < 0) {
-        fh_set_error(prog, "can't compile AST");
         goto err;
     }
 

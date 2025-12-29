@@ -70,9 +70,7 @@ struct fh_input *fh_open_input(struct fh_input *in, const char *filename) {
 }
 
 int fh_close_input(struct fh_input *in) {
-    const int ret = in->funcs->close(in);
-    free(in);
-    return ret;
+    return in->funcs->close(in);
 }
 
 int fh_read_input(struct fh_input *in, char *line, int max_len) {

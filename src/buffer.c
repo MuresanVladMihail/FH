@@ -12,9 +12,10 @@ void fh_init_buffer(struct fh_buffer *buf) {
 }
 
 void fh_destroy_buffer(struct fh_buffer *buf) {
-    if (buf->p != NULL)
+    if (buf->p != NULL) {
         free(buf->p);
-    buf->p = NULL;
+        buf->p = NULL;
+    }
     buf->size = 0;
     buf->cap = 0;
 }

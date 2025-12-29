@@ -62,8 +62,9 @@ static void reset_parser(struct fh_parser *p) {
     p->tmp_buf.size = 0;
     p->has_saved_tok = 0;
     p->last_loc = fh_make_src_loc(-1, 0, 0);
-    while (p->tokenizer)
+    while (p->tokenizer) {
         close_tokenizer(p);
+    }
 }
 
 void *fh_parse_error(struct fh_parser *p, struct fh_src_loc loc, char *fmt, ...) {
@@ -91,7 +92,7 @@ static int get_token(struct fh_parser *p, struct fh_token *tok) {
         *tok = p->saved_tok;
         p->has_saved_tok = 0;
         p->last_loc = tok->loc;
-        //printf("::: re-token '%s'  @%d:%d\n", fh_dump_token(p->ast, tok), tok->loc.line, tok->loc.col);
+        // printf("::: re-token '%s'  @%d:%d\n", fh_dump_token(p->ast, tok), tok->loc.line, tok->loc.col);
         return 0;
     }
 
@@ -376,13 +377,9 @@ static bool expr_is_lvalue(struct fh_p_expr *e) {
     return e->type == EXPR_VAR || e->type == EXPR_INDEX;
 }
 
-static struct fh_p_expr *parse_expr(struct fh_parser *p, bool consume_stop,
-                                    char *stop_chars) {
+static struct fh_p_expr *parse_expr(struct fh_parser *p, bool consume_stop, char *stop_chars) {
     struct fh_p_expr *opns = NULL;
     struct opr_info *oprs = NULL;
-    struct {
-        struct fh_p_expr *target;
-    } post;
     bool expect_opn = true;
 
     while (1) {
@@ -410,11 +407,9 @@ static struct fh_p_expr *parse_expr(struct fh_parser *p, bool consume_stop,
                 fh_parse_error_expected(p, tok.loc, "'(' or operator");
                 goto err;
             }
-            const char *sym_name = fh_get_ast_symbol(p->ast,
-                                                     tok.data.symbol_id);
+            const char *sym_name = fh_get_ast_symbol(p->ast, tok.data.symbol_id);
             if (!sym_name) {
-                fh_parse_error(p, tok.loc, "invalid symbol '%s'",
-                               fh_dump_token(p->ast, &tok));
+                fh_parse_error(p, tok.loc, "invalid symbol '%s'", fh_dump_token(p->ast, &tok));
                 goto err;
             }
 
@@ -684,10 +679,15 @@ static struct fh_p_expr *parse_expr(struct fh_parser *p, bool consume_stop,
                 if (!consume_stop)
                     unget_token(p, &tok);
 
-                //printf("BEFORE:\n"); dump_opn_stack(p, opns); dump_opr_stack(p, oprs);
-                if (resolve_expr_stack(p, tok.loc, &opns, &oprs, INT32_MIN) < 0)
+                // printf("BEFORE:\n");
+                // dump_opn_stack(p, opns);
+                // dump_opr_stack(p, oprs);
+                if (resolve_expr_stack(p, tok.loc, &opns, &oprs, INT32_MIN) < 0) {
                     goto err;
-                //printf("AFTER:\n"); dump_opn_stack(p, opns); dump_opr_stack(p, oprs);
+                }
+                // printf("AFTER:\n");
+                // dump_opn_stack(p, opns);
+                // dump_opr_stack(p, oprs);
 
                 if (opn_stack_size(&opns) > 1) {
                     dump_opn_stack(p, opns);
@@ -923,22 +923,22 @@ static struct fh_p_stmt *parse_stmt(struct fh_parser *p) {
     }
 
     // elif
-    else if (tok_is_keyword(&tok, KW_ELIF)) {
+    if (tok_is_keyword(&tok, KW_ELIF)) {
         fh_parse_error_expected(p, tok.loc, "stray 'elif'");
     }
 
     // while
-    else if (tok_is_keyword(&tok, KW_WHILE)) {
+    if (tok_is_keyword(&tok, KW_WHILE)) {
         return parse_stmt_while(p);
     }
 
     // repeat
-    else if (tok_is_keyword(&tok, KW_REPEAT)) {
+    if (tok_is_keyword(&tok, KW_REPEAT)) {
         return parse_stmt_repeat(p);
     }
 
     // for
-    else if (tok_is_keyword(&tok, KW_FOR)) {
+    if (tok_is_keyword(&tok, KW_FOR)) {
         return parse_stmt_for(p);
     }
 
@@ -953,7 +953,7 @@ static struct fh_p_stmt *parse_stmt(struct fh_parser *p) {
     }
 
     // break;
-    else if (tok_is_keyword(&tok, KW_BREAK)) {
+    if (tok_is_keyword(&tok, KW_BREAK)) {
         if (get_token(p, &tok) < 0)
             goto err;
         if (!tok_is_punct(&tok, ';'))
@@ -963,7 +963,7 @@ static struct fh_p_stmt *parse_stmt(struct fh_parser *p) {
     }
 
     // continue;
-    else if (tok_is_keyword(&tok, KW_CONTINUE)) {
+    if (tok_is_keyword(&tok, KW_CONTINUE)) {
         if (get_token(p, &tok) < 0)
             goto err;
         if (!tok_is_punct(&tok, ';'))
@@ -973,7 +973,7 @@ static struct fh_p_stmt *parse_stmt(struct fh_parser *p) {
     }
 
     // let name [= expr] ;
-    else if (tok_is_keyword(&tok, KW_LET)) {
+    if (tok_is_keyword(&tok, KW_LET)) {
         if (get_token(p, &tok) < 0)
             goto err;
         if (!tok_is_symbol(&tok))
@@ -997,7 +997,7 @@ static struct fh_p_stmt *parse_stmt(struct fh_parser *p) {
     }
 
     // { ... }
-    else if (tok_is_punct(&tok, '{')) {
+    if (tok_is_punct(&tok, '{')) {
         unget_token(p, &tok);
         if (!parse_block(p, &tok, &stmt->data.block))
             goto err;
@@ -1006,7 +1006,7 @@ static struct fh_p_stmt *parse_stmt(struct fh_parser *p) {
     }
 
     // return [expr] ;
-    else if (tok_is_keyword(&tok, KW_RETURN)) {
+    if (tok_is_keyword(&tok, KW_RETURN)) {
         if (get_token(p, &tok) < 0)
             goto err;
         if (tok_is_punct(&tok, ';')) {
@@ -1196,8 +1196,10 @@ static int new_input(struct fh_parser *p, struct fh_src_loc loc, struct fh_input
         return -1;
     }
     struct fh_tokenizer *t = fh_new_tokenizer(p->prog, in, p->ast, &p->tmp_buf, (uint16_t) file_id);
-    if (!t)
+    if (!t) {
+        fh_parse_error(p, loc, "can't create tokenizer for '%s'", fh_get_input_filename(in));
         return -1;
+    }
     t->next = p->tokenizer;
     p->tokenizer = t;
     return 0;
@@ -1242,7 +1244,8 @@ int fh_parse(struct fh_parser *p, struct fh_ast *ast, struct fh_input *in) {
                 return -1;
             vec_push(p->ast->func_vector, func);
             continue;
-        } else if (tok_is_keyword(&tok, KW_INCLUDE)) {
+        }
+        if (tok_is_keyword(&tok, KW_INCLUDE)) {
             if (process_include(p) < 0)
                 return -1;
             continue;

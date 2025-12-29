@@ -59,6 +59,9 @@ static void reset_compiler(struct fh_compiler *c) {
 }
 
 void fh_destroy_compiler(struct fh_compiler *c) {
+    if (!c) {
+        return;
+    }
     reset_compiler(c);
     func_info_stack_free(&c->funcs);
 }
@@ -745,7 +748,7 @@ static int compile_store_reg_to_lvalue(struct fh_compiler *c, struct fh_p_expr *
         int index_rk = compile_expr(c, lv->data.index.index);
         if (index_rk < 0) return -1;
 
-        // SETEL A=container, B=index, C=value  (matches your VM)
+        // SETEL A=container, B=index, C=value
         return add_instr(c, loc, MAKE_INSTR_ABC(OPC_SETEL, container_rk, index_rk, src_rk));
     }
 
