@@ -1,0 +1,22 @@
+
+fn n() {
+
+}
+
+fn a()
+: "I'm supposed to print a message"
+{
+    println("I do stuff!");
+}
+
+fn a1() : "This fn doesn't do anything"
+{
+}
+
+fn main() {
+    assert(docstring(a) == "I'm supposed to print a message");
+    assert(docstring(a1) == "This fn doesn't do anything");
+    assert(docstring(n) == "");
+
+    print('ok\n');
+}

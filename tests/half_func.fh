@@ -1,0 +1,13 @@
+
+fn err() {
+    let a = 23;
+    if (type(a) != "string") {
+        error("oops");
+    }
+}
+
+fn main(args)
+{
+    let x = 42;
+    printf("before: %d\n", x);
+

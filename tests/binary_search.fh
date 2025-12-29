@@ -1,0 +1,25 @@
+
+fn bSearch(arr, item) {
+    let low=0;
+    let high=len(arr) - 1;
+    let mid = 0;
+    while(low <= high) {
+        mid = low + tointeger((high - low) / 2);
+        if(arr[mid]==item) {
+            return mid;
+        } elif(arr[mid]<item) {
+            low=mid+1;
+        } else {
+            high=mid-1;
+        }
+    }
+    return -1;
+}
+
+fn main() {
+    # NOTE: The array must be sorted!
+    let number = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let look_for = 13;
+    let rez = bSearch(number, look_for);
+    println('Found value ' + look_for + ' at index: ' + rez);
+}

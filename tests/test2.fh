@@ -1,0 +1,30 @@
+include 'test3.fh'
+
+fn print_array(a)
+{
+    let i = 0;
+    print("[\n");
+    while (i < len(a)) {
+        printf("  %s,\n", a[i]);
+        i = i + 1;
+    }
+    print("]\n");
+}
+
+fn f() { return 0; }
+
+fn main()
+{
+    let r = [0,0,0];
+    {
+        let i = 0+f(3,4);
+        while (i < 3) {
+            let a = 0;
+            let b;
+            r[i] = fn() { return 0; };
+            i = i + 1;
+        }
+        i = i + 2;
+    }
+    print_array(r);
+}

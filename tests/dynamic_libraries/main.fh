@@ -1,0 +1,6 @@
+# This example shows how to load a custom library
+
+fn main() {
+    let rez = custom_library_func1();
+    println(rez);
+}

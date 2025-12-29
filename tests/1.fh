@@ -1,0 +1,42 @@
+
+fn class() {
+    let self = {};
+
+    self.a = fn() {
+        return 42;
+    };
+
+    self.b = 12;
+
+    return self;
+}
+
+fn mockFunc(class, member, retValue) {
+    if (type(member) != 'string') {
+        error('member was expected to be of type string');
+    }
+    class[member] = fn () { return retValue; };
+}
+
+fn mockMember(class, member, retValue) {
+    if (type(member) != 'string') {
+        error('member was expected to be of type string');
+    }
+    class[member] = retValue;
+}
+
+fn main() {
+	let a = ['vlad', 'dope', 1, 2, 3, null];
+	for (let i = 0; i < len(a); i = i + 1) {
+		println('Read array: ', a[i]);	
+	}
+
+	let a = {2: 2};
+
+    let c = class();
+    mockFunc(c, 'a', 3);
+    mockMember(c, 'b', 42);
+    println(c.a(), ' ', c.b);
+
+	assert(1 > 3, "This is a custom message for assertion");
+}

@@ -1,0 +1,8 @@
+#!/bin/sh
+CFLAGS="-fsanitize=address -g -O1" \
+LDFLAGS="-fsanitize=address" \
+make clean && make
+for a in tests/test_*.fh; do
+  echo "$a"
+  ./fh "$a"
+done

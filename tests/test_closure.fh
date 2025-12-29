@@ -1,0 +1,53 @@
+
+fn add3(a)
+{
+    return fn(b) {
+        return fn(c) {
+            return a + b + c;
+        };
+    };
+}
+
+fn make_counter(c)
+{
+    return [
+    fn() { return c; },
+    fn(n) { c = c + n; }
+    ];
+}
+
+fn types_of_closures() {
+    let c = fn() {
+        return 42;
+    };
+	let c = fn(){};
+	fn() {
+		let c = 42;
+		assert(c == 42);
+	}();
+	let c = fn () {
+	};
+	let c = fn(){};
+}
+
+fn main()
+{
+    let c1 = make_counter(0);
+    let c2 = make_counter(100);
+
+    types_of_closures();
+
+    c1[1](1);
+    c1[1](1);
+    if (c1[0]() != 2) error("nope");
+
+        c2[1](15);
+        if (c2[0]() != 115) error("nope");
+
+            c1[1](1);
+            if (c1[0]() != 3) error("nope");
+
+                if (add3(1)(2)(3) != 6) error("nope");
+
+                    print("ok\n");
+                }

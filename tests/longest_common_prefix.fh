@@ -1,0 +1,105 @@
+# Write a fn to find the longest common
+# prefix string amongst an array of strings.
+# If there is no common prefix, return an empty string "".
+
+# Input: ["flower","flow","flight","poop"]
+# Output: "fl"
+
+# Example
+# Input: ["dog","racecar","car"]
+# Output: ""
+# Explanation: There is no common prefix among the input strings.
+
+# Note, all given input is lowercase letters, a - z.
+
+fn look_ahead(arr, arr2, i, l) {
+    let np = [];
+    let new = false;
+    while (i < l) {
+        if (arr[0] != arr2[0]) {
+            return [false, []];
+        }
+        if (arr[i] == arr2[i]) {
+            let next = i + 1;
+            if (look_ahead(arr, arr2, next, l) == true) {
+                append(np, arr2[next]);
+            }
+            append(np, arr2[i]);
+            new = true;
+        }
+        i = i + 1;
+    }
+    return [new, np];
+}
+
+fn main()
+{
+    let input = ["flower","flow","flight"];
+    let input_len = len(input);
+    let prefix = [];
+
+    let has = fn(a, c) {
+        let l = len(a);
+        let i = 0;
+        while (i < l) {
+            if (a[i] == c) {
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
+    };
+
+    let smallest_len = fn(a, b) {
+        let l1 = len(a);
+        let l2 = len(b);
+        let l = 0;
+        if (l1 < l2) {
+            l = l1;
+        } else {
+            l = l2;
+        }
+        return l;
+    };
+
+    let cmp = fn(a, b, l) {
+        let i = 0;
+        let rez = look_ahead(a, b, i, l);
+        let lp = [];
+        if (rez[0] == true) {
+            lp = rez[1];
+            if (len(prefix) == 0) {
+                prefix = lp;
+            } else {
+                let rez = look_ahead(prefix, lp, i, smallest_len(prefix, lp));
+                prefix = rez[1];
+            }
+        }
+    };
+
+    let i = 0;
+    while (i < input_len) {
+
+        if (i + 1 >= input_len) {
+            break;
+        }
+        let l = smallest_len(input[i], input[i+1]);
+        cmp(input[i], input[i+1], l);
+        i = i + 1;
+    }
+
+    let prefix_len = len(prefix);
+    if (prefix_len > 0) {
+        i = 0;
+        print ("Prefix: \n");
+        while (i < prefix_len) {
+            print (prefix[i], "");
+            i = i + 1;
+        }
+        print("\n");
+    } else {
+        print ("No prefix!\n");
+    }
+    #printf("%b\n", "0" == 0);
+    assert(prefix[0] == "f" && prefix[1] == "l");
+}

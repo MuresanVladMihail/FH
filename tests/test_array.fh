@@ -1,0 +1,85 @@
+
+fn print_array(arr)
+{
+    let arr_len = len(arr);
+    printf("array has %d elements:\n", arr_len);
+    let i = 0;
+    while (i < arr_len) {
+        printf("  [%d] = %s\n", i, arr[i]);
+        i = i + 1;
+    }
+}
+
+fn main(args)
+{ 
+    let x = [1,[2],3,];
+    append(x, "four", "五");
+
+    assert(x[0]);
+    assert(x[1]);
+    assert(x[4]);
+    assert(!x[5]);
+
+    assert(len(x) == 5, "nope");
+
+    x[0] = "hello, world!";
+
+    assert(len(x) == 5, "nope");
+
+    if (x[0] != "hello, world!") {
+        error("nope");
+    }
+
+    let _arr = [2];
+    let a = [42, "hello", _arr];
+    assert(a[0] == 42.0);
+    assert(a[1] == "hello");
+    assert(a[1][0] == "h");
+    assert(a[1][1] == "e");
+    assert(a[1][2] == "l");
+    assert(a[1][3] == "l");
+    assert(a[1][4] == "o");
+    assert(a[2] == _arr);
+    assert(has(a, "hello")[1] == 1);
+    assert(has(a, "hello")[0] == "hello");
+
+    let test = [];
+    insert(test, 50, 'Hi');
+    assert(test[50] == 'Hi');
+    insert(test, 30, 32);
+    gc();
+    assert(test[30] == 32);
+    insert(test, 10, true);
+    assert(test[10] == true);
+    insert(test, 69, false);
+    assert(test[69] == false);
+
+    let t = [];
+    grow(t, 50);
+    assert(len(t) == 50);
+    for (let i = 0; i < 50; i = i + 1) {
+        t[i] = i;
+        if (i == 30) {
+            gc();
+            t[20] = 20;
+        }
+        assert(t[i] == i);
+    }
+
+    reset(t);
+    assert(has(t, 0) == false);
+    assert(len(t) == 0);
+
+    reset(test);
+    assert(has(test, 'Hi') == false);
+    assert(len(test) == 0);
+
+    for (let i = 0; i < 10; i = i + 1) {
+        append(test, i);
+    }
+    assert(len(test) == 10);
+    assert(test[5] == 5);
+
+    print("ok\n");
+}
+

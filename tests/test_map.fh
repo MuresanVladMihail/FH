@@ -1,0 +1,49 @@
+
+fn main(args)
+{
+    let x = {
+        "hello" : "world",
+        true : "yes",
+        false : "no",
+        4 : "four"
+    };
+
+    if (len(x) != 4) { 
+        error("nope");
+    }
+
+    x[5] = "五";
+
+    if (len(x) != 5) { 
+        error("nope"); 
+    }
+    if (x[5] != "五") { 
+        error("nope");
+    }
+    if (x[true] != "yes") { 
+        error("nope");
+    }
+
+    assert(len(x) > 0);
+    assert(contains_key(x, "hello") == true); 
+    assert(contains_key(x, true) == true); 
+    assert(contains_key(x, false) == true); 
+
+    reset(x);
+    assert(len(x) == 0);
+    assert(contains_key(x, "hello") == false); 
+    assert(contains_key(x, true) == false); 
+    assert(contains_key(x, false) == false); 
+
+	x.hi = 'hi';
+	x.no = 'foo';
+	x.bar = 42;
+
+	assert(len(x) == 3);
+	assert(x.hi == 'hi');
+	assert(x.no == 'foo');
+	assert(x.bar == 42);
+
+    print("ok\n");
+}
+

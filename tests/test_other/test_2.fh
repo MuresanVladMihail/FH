@@ -1,0 +1,22 @@
+
+# fn call speed benchmark
+
+fn f(x)
+{
+    return x;
+}
+
+fn main()
+{
+	let f2 = fn(x) {
+		return x;
+	};
+
+    let i = 0;
+    while (i < 200000000) {
+        f(i);
+		f2(i);
+        i=i+1;
+    }
+    println(i);
+}

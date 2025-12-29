@@ -1,0 +1,30 @@
+# Testing the error handling system
+
+include "4-1.fh"
+
+fn main() {
+    aa();
+}
+
+fn cc() {
+    let yolo = "yolo";
+    let ma = {};
+    calc();
+}
+
+fn bb(){
+    cc();
+}
+
+fn aa() {
+    let e = 3;
+    let self = {};
+    let a = fn() {
+        second();
+    };
+    a();
+}
+
+fn second() {
+    bb();
+}

@@ -1,0 +1,30 @@
+
+fn call_with_goodbye(f)
+{
+    fn(x) {
+        x("goodbye");
+    }(f);
+}
+
+fn test()
+{
+    let i = 0;
+    while (i < 10) {
+        fn(x) { print(x, "\n"); }(i);
+        i = i + 1;
+    }
+    let a = fn();
+    gc();  # check release of all created closures
+    a();
+    let b = fn() { println ("FH is awesome!"); } ();
+}
+
+fn main(args)
+{
+    let f = fn(x) {
+        printf("%s from inner fn\n", x);
+    };
+    f("hello");
+    call_with_goodbye(f);
+    test();
+}

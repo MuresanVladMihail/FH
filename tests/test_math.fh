@@ -1,0 +1,36 @@
+
+
+fn main() {
+    math_randomseed();
+
+    assert(math_abs(0) == 0);
+    assert(math_abs(-3) == 3);
+    assert(math_abs(-42.2) == 42.2);
+    assert(math_abs(2) == 2);
+
+    let x = math_modf(8.123);
+    let x1 = x[0];
+    let x2 = x[1];
+    assert(x1 == 8);
+
+    # Blame floating point calculation for this check!
+    assert(math_abs(x2 - 0.123) <= math_flt_epsilon() == true);
+
+    assert(math_pow(2, 2) == 4);
+    assert(math_ceil(2.2) == 3);
+    assert(math_floor(4.2) == 4);
+    assert(math_sqrt(16) == 4);
+    assert(math_max(2, 42) == 42);
+    assert(math_min(2, 42) == 2);
+
+    x = math_frexp(1024);
+    assert(x[1] == 0.5);
+    assert(x[0] == 11);
+
+    x = math_ldexp(0.95, 4);
+    assert(x == 15.2);
+
+    assert(math_clamp(20, 5, 10) == 10);
+
+    print ("ok\n");
+}

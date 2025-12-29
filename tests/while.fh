@@ -1,0 +1,23 @@
+
+fn main()
+{
+    let i = 0;
+    let len1 = 12;
+    while (i < len1) {
+        if (i == 5) {
+            i = i + 1;
+            continue;
+        }
+        if (i == 8) {
+            let j  = i + 1;
+            while (j < len1) {
+                j = j + 1;
+            }
+        } elif (i == 9) {
+            println('called at 9');
+            continue;
+        }
+        print(i, "\n");
+        i = i + 1;
+    }
+}

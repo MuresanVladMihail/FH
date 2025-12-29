@@ -1,0 +1,20 @@
+
+#-
+Note: Upper case variables are considered as being constant.
+-#
+
+fn main() {
+    let V = 42;
+    assert(V == 42);
+    assert(V * 2 == 84);
+    assert(V >> 0 == 42);
+    let V1 = "not-constant";
+    assert(V1 == "not-constant");
+    let a = V;
+    assert(a == 42);
+    a = 43;
+    assert(a == 43);
+    let PE = a;
+    assert(PE == 43);
+    print("ok\n");
+}

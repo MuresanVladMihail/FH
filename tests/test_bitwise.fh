@@ -1,0 +1,35 @@
+
+
+fn main() {
+    let a = 2;
+    assert(a | 2 == 2);
+    assert(a | 45 == 47);
+    assert(6 | 42 == 46);
+
+    assert(a & 45 == 0);
+    assert(5 & 89 == 1);
+    assert(8 & 4 == 0);
+    assert(11 & 5 == 1);
+    assert(3 & 124 == 0);
+    assert(45 & 45 == 45);
+
+    assert(2 ^ 3 == 1);
+    assert(1 ^ 7 == 6);
+    assert(99 ^ 7 == 100);
+
+    assert(1 << 2 == 4);
+    assert(1 << 0 == 1);
+    assert(1 << 1 == 2);
+
+    assert(2 >> 1 == 1);
+    assert(2 >> 0 == 2);
+    assert(2 >> 3 == 0);
+    assert(1241 >> 2 == 310);
+
+    assert(~2 == -3);
+    assert(~12 == -13);
+    assert(~22 == -23);
+    assert(~42 == -43);
+
+    print("ok\n");
+}

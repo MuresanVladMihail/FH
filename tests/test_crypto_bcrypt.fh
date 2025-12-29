@@ -1,0 +1,51 @@
+
+fn compare_passwords() 
+{
+	let database_password = "hello,mom";
+	let SALT = math_bcrypt_gen_salt(12);
+	assert (len(SALT) > 0);
+
+	let HASH = math_bcrypt_hashpw(database_password, SALT);
+	assert (len(HASH) > 0);
+
+	# At this point we 'store' variable 'HASH' into the database
+
+	# Now, let's simulate a login request
+	let passwd2 = "hello,mom"; # the password in the request
+
+	let HASH2 = math_bcrypt_hashpw(passwd2, HASH); # 'fetch' HASH from the database and check it against the request password
+	assert (len(HASH2) > 0); # we're expecting a valid HASH2
+	
+	assert (HASH2 == HASH);
+
+	print("comparing request password with the saved password (1) - ok\n");
+}
+
+fn compare_password_fail() {
+	let database_password = "hello,mom";
+	let SALT = math_bcrypt_gen_salt(12);
+	assert (len(SALT) > 0);
+
+	let HASH = math_bcrypt_hashpw(database_password, SALT);
+	assert (len(HASH) > 0);
+
+	# At this point we 'store' variable 'HASH' into the database
+
+	# Now, let's simulate a login request
+	let passwd2 = "bye,dad!"; # the password in the request
+
+	let HASH2 = math_bcrypt_hashpw(passwd2, HASH); # 'fetch' HASH from the database and check it against the request password
+	assert (len(HASH2) > 0); # we're expecting a valid HASH2
+	
+	assert (HASH2 != HASH);
+
+	print("comparing request password with the saved password (2) - ok\n");
+}
+
+fn main(args) 
+{
+   	compare_passwords();
+	compare_password_fail();
+
+	print('ok\n');
+}

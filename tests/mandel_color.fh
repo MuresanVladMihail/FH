@@ -1,0 +1,48 @@
+fn calc_point(cx, cy, max_iter)
+{
+    let i = 0;
+    let x = 0;
+    let y = 0;
+    while (i < max_iter) {
+        let t = x*x - y*y + cx;
+        y = 2*x*y + cy;
+        x = t;
+        if (x*x + y*y > 4)
+            break;
+            i = i + 1;
+        }
+        return i;
+    }
+
+    fn mandelbrot(x1,y1, x2,y2, size_x,size_y, max_iter)
+    {
+        let step_x = (x2-x1)/(size_x-1);
+        let step_y = (y2-y1)/(size_y-1);
+
+        let y = y1;
+        while (y <= y2) {
+            let x = x1;
+            while (x <= x2) {
+                let c = calc_point(x, y, max_iter);
+                if (c == max_iter)
+                    printf("\e[37;40m ");
+                else
+                    printf("\e[37;4%dm ", c%6+1);
+                    x = x + step_x;
+                }
+                y = y + step_y;
+                printf("\e[0m\n");
+            }
+        }
+
+        fn main()
+        {
+            let lines = get_term_lines();
+            if (lines <= 0)
+                lines = 25;
+                lines = lines - 1;
+                if (lines % 2 == 0)
+                    lines = lines - 1;
+                    let cols = 2.2*lines;
+                    mandelbrot(-2, -2, 2, 2, cols, lines, 1500);
+                }

@@ -1,0 +1,9 @@
+fn main() {
+	let i = '';
+	let b = '';
+	while((i = io_read()) != 'stop') {
+		i = i + '\n';
+		b = string_join(i, b);
+	}
+	println('We read: ', b);
+}

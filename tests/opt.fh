@@ -1,0 +1,7 @@
+
+fn main()
+{
+    "banana";
+    fn(){};
+    fn();
+}

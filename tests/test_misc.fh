@@ -1,0 +1,22 @@
+fn main() {
+
+    let a = eval("fn test_eval() { return 1 + 1; }", 
+    "test_eval");
+    assert(a == 2);
+
+    gc();
+
+    let b = eval("fn test_eval2() { return [42, 22]; }", 
+    "test_eval2");
+    assert(b[0] == 42 && b[1] == 22);
+
+    gc();
+
+    let c = eval("fn test_eval3() { let self = {}; self.x = 42; self.y = 123; self.a = fn() {return 'yolo'; }; return self; }", 
+    "test_eval3");
+
+    gc();
+    assert(c.y == 123 && c.x == 42 && type(c.a) == 'closure');
+
+    print('ok\n');	
+}

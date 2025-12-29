@@ -1,0 +1,16 @@
+
+fn calc() {
+    # 'a' doesn't exist
+    let self = {};
+
+    self.v = fn() {
+        let a = 2;
+        append(a, 123);
+        a.t = a.o;
+        println(' da ');
+        return a;
+    };
+    self.v();
+
+    return self;
+}

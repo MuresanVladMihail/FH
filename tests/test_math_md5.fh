@@ -1,0 +1,12 @@
+fn main(args) 
+{
+    let key = "6cd3556deb0da54bca060b4c394798396cd3556deb0da54bca060b4c394798396cd3556deb0da54bca060b4c39479839";
+    assert(math_md5(key) == '22294470b7d894e217fc544069df5fdd');
+
+    key = 'Hello, world!';
+    assert(math_md5(key) == '6cd3556deb0da54bca060b4c39479839');
+
+    print('ok\n');
+}
+
+

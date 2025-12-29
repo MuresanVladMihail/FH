@@ -1,0 +1,29 @@
+fn main() {
+    #fh = file handler
+    let fh = io_open("tests/write_test.txt", "wb");
+    io_write(fh, "Hello ");
+    io_write(fh, "\n");
+    io_write(fh, 42);
+    io_write(fh, "\n");
+    io_write(fh, true);
+    io_write(fh, "\n");
+    io_write(fh, false);
+
+    io_seek(fh, 5, "set");
+    io_write(fh, " World! :-)");
+    io_close(fh);
+
+    fh = io_open("tests/write_test.txt");
+    printf('%s\n', io_read(fh));
+    io_close(fh);
+
+    io_rename('tests/write_test.txt', 'tests/to_be_removed.txt');
+    io_remove('tests/to_be_removed.txt');
+
+    let err = io_mkdir('tests/TEST_MK_DIR');
+
+    assert(io_filetype('tests/1.fh') == 'file');
+    assert(io_filetype('tests') == 'directory');
+
+    println ('ok');
+}

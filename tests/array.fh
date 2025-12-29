@@ -1,0 +1,34 @@
+
+#-fn print_array(arr)
+{
+    let arr_len = len(arr);
+    printf("array has %d elements:\n", arr_len);
+    let i = 0;
+    while (i < arr_len) {
+        printf("  [%d] = %s\n", i, arr[i]);
+        i = i + 1;
+    }
+}-#
+
+fn main(args)
+{
+    let x = [0, 1, [2], 3];
+
+    delete(x, 0);
+    append(x, "four", "final");
+
+    printf("BEFORE: ");
+    println(x);
+
+    x[0] = "hello, world!";
+
+    printf("AFTER: ");
+    println(x);
+
+    let _arr = [2];
+    let a = [42, "hello", _arr];
+    assert(a[0] == 42);
+    assert(a[1] == "hello");
+    assert(a[2] == _arr);
+}
+

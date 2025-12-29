@@ -1,0 +1,13 @@
+fn main()
+{
+	let tar = io_tar_open("tests/test_package/test.fhpack");
+	let rez = io_tar_list(tar);
+
+    assert(len(rez) > 0);
+    for (let i = 0; i < len(rez); i = i + 1) {
+        let file = io_tar_read(tar, rez[i]);
+        assert(len(file) > 0);
+    }
+    io_tar_close(tar);
+    print("ok\n");
+}

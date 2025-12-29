@@ -1,0 +1,168 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "FH",
+  "scopeName": "source.fh",
+  "fileTypes": ["fh"],
+  "patterns": [
+    { "include": "#comment-block" },
+    { "include": "#comments" },
+
+    { "include": "#docstringAfterFn" },
+    { "include": "#fnDeclName" },
+
+    { "include": "#strings" },
+    { "include": "#numbers" },
+
+    { "include": "#keywords" },
+    { "include": "#constants" },
+    { "include": "#builtins" },
+
+    { "include": "#types" },
+
+    { "include": "#member" },
+    { "include": "#functionCall" },
+
+    { "include": "#mapKeys" },
+    { "include": "#directives" }
+  ],
+  "repository": {
+    "comment-block": {
+      "name": "comment.block.fh",
+      "begin": "#-",
+      "end": "-#",
+      "patterns": [
+        { "include": "#todo" }
+      ]
+    },
+    "comments": {
+      "name": "comment.line.number-sign.fh",
+      "begin": "#",
+      "end": "$",
+      "patterns": [
+        { "include": "#todo" }
+      ]
+    },
+    "todo": {
+      "name": "keyword.other.todo.fh",
+      "match": "\\b(todo|todo:|tbd:|tbd|TODO|TODO:|TBD|TBD:|FIXME|FIXME:|XXX|XXX:|NOTE|NOTE:|note|note:|fixme|fixme:|xxx|xxx:)\\b"
+    },
+
+    "directives": {
+      "patterns": [
+        {
+          "name": "meta.preprocessor.fh",
+          "match": "^\\s*###\\s*$"
+        }
+      ]
+    },
+
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.fh",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            { "name": "constant.character.escape.fh", "match": "\\\\(e\\[[0-9;]*m|x[0-9A-Fa-f]+|[0-7]{1,3}|[\"\\\\'0abfnrtvx]|\\$|.)" }
+          ]
+        },
+        {
+          "name": "string.quoted.single.fh",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            { "name": "constant.character.escape.fh", "match": "\\\\(e\\[[0-9;]*m|x[0-9A-Fa-f]+|[0-7]{1,3}|[\"\\\\'0abfnrtvx]|\\$|.)" }
+          ]
+        }
+      ]
+    },
+
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.fh",
+          "match": "\\b(\\d+\\.\\d*|\\.\\d+)([eE][+-]?\\d+)?[dD]?\\b|\\b\\d+[eE][+-]?\\d+[dD]?\\b"
+        },
+        {
+          "name": "constant.numeric.hex.fh",
+          "match": "\\b0[xX][0-9A-Fa-f]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.fh",
+          "match": "\\b(0|[1-9]\\d*)(u?l{0,2}|ll?u)?\\b"
+        }
+      ]
+    },
+
+    "keywords": {
+      "name": "keyword.control.fh",
+      "match": "\\b(if|elif|else|for|while|repeat|until|break|continue|return|include|let|fn)\\b"
+    },
+
+    "types": {
+      "name": "keyword.other.fh",
+      "match": "\\b(number|string|bool|map|array)\\b"
+    },
+
+    "constants": {
+      "name": "constant.language.fh",
+      "match": "\\b(true|false|null)\\b"
+    },
+
+    "builtins": {
+      "name": "support.function.builtin.fh",
+      "match": "\\b(printf|println|print|len|append|delete|assert|type|error|next_key|contains_key|io_open|io_read|io_write|io_close|io_seek|math_tanh|math_tan|math_sqrt|math_sinh|math_sin|math_randomseed|math_random|math_rad|math_pow|math_flt_epsilon|math_pi|math_modf|math_min|math_max|math_log10|math_log|math_ldexp|math_huge|math_frexp|math_fmod|math_floor|math_ceil|math_exp|math_deg|math_cosh|math_cos|math_atan2|math_atan|math_asin|math_acons|math_cons|math_abs|string_trim|string_char|string_find|string_upper|string_lower|string_reverse|string_substr|os_time|os_difftime|os_localtime|os_command|os_getenv|os_getOS|tostring|tonumber|getversion|string_format|docstring|gc|gcfrequency|string_join|gc_pause|gc_info|extends|math_clamp|string_split|string_slice|string_match|grow|insert|tointeger|math_maxval|has|eval|gc_frequency|io_tar_open|io_tar_read|io_tar_list|io_tar_close|io_tar_write_header|io_tar_write_data|io_tar_write_finalize|reset|has_index|export|math_md5|math_bcrypt_gen_salt|math_bcrypt_hashpw|io_scan_line|get_term_lines|mandelbrot|bSearch)\\b"
+    },
+
+    "fnDeclName": {
+      "patterns": [
+        {
+          "name": "meta.function.definition.fh",
+          "match": "\\bfn\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "entity.name.function.fh" }
+          }
+        }
+      ]
+    },
+
+    "docstringAfterFn": {
+      "patterns": [
+        {
+          "name": "meta.function.docstring.fh",
+          "match": "(?<=\\))\\s*:\\s*(\"([^\"\\\\]|\\\\.)*\"|'([^'\\\\]|\\\\.)*')",
+          "captures": {
+            "1": { "name": "string.quoted.fh" }
+          }
+        }
+      ]
+    },
+
+    "member": {
+      "patterns": [
+        {
+          "match": "(?<=\\.)[A-Za-z_][A-Za-z0-9_]*",
+          "name": "variable.other.member.fh"
+        }
+      ]
+    },
+
+    "functionCall": {
+      "patterns": [
+        {
+          "name": "entity.name.function.fh",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()"
+        }
+      ]
+    },
+
+    "mapKeys": {
+      "patterns": [
+        {
+          "name": "meta.mapping.key.fh",
+          "match": "(\"([^\"\\\\]|\\\\.)*\"|'([^'\\\\]|\\\\.)*'|\\btrue\\b|\\bfalse\\b|\\bnull\\b|\\b(0|[1-9]\\d*)\\b)\\s*(?=\\:)"
+        }
+      ]
+    }
+  }
+}

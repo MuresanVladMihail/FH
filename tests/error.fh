@@ -1,0 +1,7 @@
+
+include "error_include.fh"
+
+fn main()
+{
+    make_error("hello!");
+}

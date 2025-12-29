@@ -1,0 +1,30 @@
+{
+  "name": "fh",
+  "displayName": "FH Script Language",
+  "description": "A small embedded script language.",
+  "version": "0.1.0",
+  "publisher": "Mureşan Vlad Mihail",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "fh",
+        "aliases": ["FH", "fh"],
+        "extensions": [".fh"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "fh",
+        "scopeName": "source.fh",
+        "path": "./syntaxes/fh.tmLanguage.json"
+      }
+    ]
+  }
+}

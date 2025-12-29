@@ -1,0 +1,30 @@
+
+fn print_map(map)
+{
+    let map_len = len(map);
+    printf("{\n");
+    let k = next_key(map, null);
+    while (k != null) {
+        printf("  %s : %s,\n", k, map[k]);
+        k = next_key(map, k);
+    }
+    printf("}\n");
+}
+
+fn main()
+{
+    let printer = fn(x) { printf("%s\n", x); };
+    let x = {
+        "print" : printer,
+        "test" : {
+            "print" : printer,
+        },
+        "getmap" : fn() { return { "print" : printer }; },
+    };
+    print_map(x);
+    print_map(x.test);
+    x.print("test");
+    x.test.print(42);
+    x.getmap().print("hello");
+}
+

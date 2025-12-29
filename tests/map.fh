@@ -1,0 +1,52 @@
+
+fn print_map(map)
+{
+    let map_len = len(map);
+    printf("{\n");
+    let k = next_key(map, null);
+    while (k != null) {
+        printf("  %s : %s,\n", k, map[k]);
+        k = next_key(map, k);
+    }
+    printf("}\n");
+}
+
+fn f()
+{
+}
+
+fn main(args)
+{
+    let x = {
+        "hello" : "world",
+        true : "yes",
+        false : "no",
+        5 : "五",
+        "please_print" : fn(x) { printf("OK, I'll print '%s'\n", x); },
+        "calc" : 1+2,
+        printf : "func printf",
+        print : "func print",
+    };
+
+    if (x["calc"] != 3) {
+        error("calc");
+    }
+    delete(x, "calc");
+
+    x[main] = "main";
+
+    x["please_print"](42);
+
+    if (! contains_key(x, 5)) {
+        error("nope");
+    }
+    if (contains_key(x, "not in array")) {
+        error("nope");
+    }
+
+    printf("printf -> %s\n", x[printf]);
+    printf("hello -> %s\n", x["hello"]);
+
+    print_map(x);
+}
+

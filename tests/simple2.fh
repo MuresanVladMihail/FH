@@ -1,0 +1,11 @@
+
+fn f(a, b)
+{
+    return 1+a*b;
+}
+
+fn main(x)
+{
+    print(x);
+    return 2*tonumber(x[2]) + f(tonumber(x[1]), 3);
+}

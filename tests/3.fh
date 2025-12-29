@@ -1,0 +1,10 @@
+
+fn main() {
+    let a = true;
+    let c = false;
+    let a1 = 2;
+    let c2 = 33;
+    if (a == true || c == false || a1 > 33 || c2 == 31) {
+    }
+}
+

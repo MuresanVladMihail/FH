@@ -1,0 +1,5 @@
+include 'test3.fh'
+
+fn main() {
+    pu();
+}

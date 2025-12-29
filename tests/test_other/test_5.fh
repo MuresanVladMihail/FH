@@ -1,0 +1,9 @@
+fn main() {
+	let m = [];
+    let c = {};
+	for (let i = 0; i < 1000000; i = i + 1) {
+		append(m, i);
+        reset(c);
+	}
+	println(m[789]);
+}

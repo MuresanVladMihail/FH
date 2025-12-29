@@ -1,0 +1,48 @@
+
+include "mandel_lib.fh"
+
+fn get_text_output()
+{
+    return {
+        "point_inside" : fn() {
+            printf(".");
+        },
+
+        "point_outside" : fn(c) {
+            printf("%d", c%10);
+        },
+
+        "end_line" : fn() {
+            printf("\n");
+        },
+    };
+}
+
+fn get_color_output()
+{
+    return {
+        "point_inside" : fn() {
+            printf("\e[37;40m ");
+        },
+
+        "point_outside" : fn(c) {
+            printf("\e[37;4%dm ", c%6+1);
+        },
+
+        "end_line" : fn() {
+            printf("\e[0m\n");
+        },
+    };
+}
+
+fn main(args)
+{
+    let lines = get_term_lines();
+    if (lines <= 0)
+        lines = 25;
+        lines = lines - 1;
+        if (lines % 2 == 0)
+            lines = lines - 1;
+            let cols = 2.2*lines;
+            mandelbrot(-2, -2, 2, 2, cols, lines, 1500, get_color_output());
+        }

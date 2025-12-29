@@ -1,0 +1,58 @@
+#-
+This example shows how you can extend one 'class' to another.
+-#
+fn entityClass() {
+    let self = {};
+    self.a = 123;
+    self.name = "unamed entity";
+
+    return {
+        'init': fn(name) {
+            if (type(name) != 'string') {
+                error('Expected string type, got: ' + type(name));
+            }
+            self.name = name;
+        },
+        'getName': fn() {
+            return self.name;
+        },
+        'setName': fn(name) {
+            self.name = name;
+        },
+        'getA': fn () {
+            return self.a;
+        },
+        'getSelf': fn () {
+            return self;
+        },
+    };
+}
+
+fn DogClass() {
+    let self = {};
+    let super = {};
+    extends(super, entityClass());
+    self = {
+        'init': fn(name) {
+            super.init(name);
+            #super.setName('not tomi!');
+        },
+        'bark': fn() {
+            println("BARK, barK!");
+        },
+    };
+    extends(self, super);
+    return self;
+}
+
+fn main() {
+    let dog = DogClass();
+    dog.init('tomi');
+    dog.bark();
+    println('Dog\'s name is: ' + dog.getName()); # + ' ' +  dog.getSelf().name);
+
+    assert(dog.getSelf().name == dog.getName());
+    assert(dog.getSelf().a == dog.getA());
+
+    println('mem usage: ' + gcinfo()/1000 + ' KB');
+}

@@ -1,0 +1,11 @@
+
+fn main()
+{
+    print("Hello, world!\n");
+	let tar = io_tar_open("tests/test_package/test.fhpack");
+	let rez = io_tar_list(tar);
+
+	println(io_tar_read(tar, rez[0]), rez);	
+
+    io_tar_close(tar);
+}

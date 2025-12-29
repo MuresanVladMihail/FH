@@ -1,0 +1,40 @@
+
+fn make_counter(num) {
+    return {
+        "next" : fn() {
+            num = num + 1;
+        },
+
+        "read" : fn() {
+            return num;
+        },
+    };
+}
+
+fn main() {
+    print("Hello, world!\n");
+
+    let c1 = make_counter(0);
+    let c2 = make_counter(10);
+    c1.next();
+    c2.next();
+    printf("%d, %d\n", c1.read(), c2.read());    # prints 1, 11
+
+    c1.next();
+    if (c1.read() == 2 && c2.read() == 11) {
+        printf("ok!\n");
+    } else {
+        error("this should will not happen");
+    }
+
+    let i = 1;
+    while (i <= 10) {
+        if (i == 6)
+            break;
+            printf("%d\n", i);
+            i = i + 1;
+        }
+
+        return;
+        error("this should will not happen");
+    }

@@ -1,0 +1,7 @@
+fn p1() {
+    println("Hi from test3.fh");
+}
+
+fn pu() {
+    p1();
+}

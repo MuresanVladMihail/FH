@@ -1,0 +1,49 @@
+
+fn main() {
+
+#-
+    Simple mutli
+        line comment-#
+        let a = 213;
+#- Another mutiline comment,
+    heyooo
+        -#
+#-
+        1
+        2
+# 3, 4, 5
+#- 6, 7, 8
+        error("Shouldn't be seen!");
+    -#
+#-FH is an awesome language!
+
+        -------------------------------------------
+        | println("I'm inside a multi-line comment, I shouldn't be displayed!!");
+    | assert(1 > 100);
+    -------------------------------------------
+        -##println("done");
+
+#-FH is an awesome language!
+
+    -------------------------------------------
+        | println("I'm inside a multi-line comment, I shouldn't be displayed!!");
+    | assert(1 > 100);
+    -------------------------------------------
+#-#
+
+
+#-FH is an awesome language!
+
+        -------------------------------------------
+        | println("I'm inside a multi-line comment, I shouldn't be displayed!!");
+    | assert(1 > 100);
+    -------------------------------------------
+# -#
+#-                                          FH is an awesome language!
+        -------------------------------------------
+#-#
+
+# Hello there!
+# Bye
+        print("ok\n");
+}

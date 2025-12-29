@@ -1,0 +1,10 @@
+
+fn f()
+{
+    let x = 0;
+    {
+        let k = 0;
+    }
+    print(k);  # error: unknown let 'k'
+    print(x);
+}

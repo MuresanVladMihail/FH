@@ -1,0 +1,232 @@
+fn main() {
+    let a = 42;
+    if (a == 1) {
+        error("nope");
+    } elif (a == 2) {
+        error("nope");
+    } elif (a == 3) {
+        error("nope");
+    } elif (a == 42) {
+    }
+
+    if (a == 42) {
+    } else {
+        error("nope");
+    }
+
+    a = 1;
+    if (a != 42) {
+    } else {
+        error("nope");
+    }
+
+    a = "_fh_";
+
+    if (a == "yolo") {
+        error("nope");
+    } elif (a == "_fh_") {
+    }
+
+    if (a == "yolo") {
+        error("nope");
+    } else {
+    }
+
+    if (a == "yolo"){
+
+    }
+
+    let x = [1,[2],3,];
+    append(x, "four", "v");
+
+    if (len(x) != 5) error("nope");
+
+
+        let a = 1997;
+        if (a == 1) {
+            error("nope");
+
+        } elif (a == 2) {
+            error("nope");
+
+        }
+        elif (a == 3) {
+            error("nope");
+
+        }
+        elif (a == 4) {
+            error("nope");
+
+        }
+        elif (a == 5) {
+            error("nope");
+
+        }
+        elif (a == 6) {
+            error("nope");
+
+        }
+        elif (a == 6) {
+            error("nope");
+
+        }
+        elif (a == 1232) {
+            error("nope");
+
+        }
+        elif (a == 552) {
+            error("nope");
+
+        }
+        elif (a == 255) {
+            error("nope");
+
+        }
+        elif (a == 882) {
+            error("nope");
+
+        }
+        elif (a == 662) {
+            error("nope");
+
+        }
+        elif (a == 432) {
+            error("nope");
+
+        }
+        elif (a == 892) {
+            error("nope");
+
+        }
+        elif (a == 24) {
+            error("nope");
+
+        }
+        elif (a == 32) {
+            error("nope");
+
+        }
+        elif (a == 24) {
+            error("nope");
+
+        }
+        elif (a == 222) {
+            error("nope");
+
+        }
+        elif (a == 211) {
+            error("nope");
+
+        }
+        elif (a == 298) {
+            error("nope");
+
+        }
+        elif (a == 762) {
+            error("nope");
+
+        }
+        elif (a == 432) {
+            error("nope");
+
+        }
+        elif (a == 782) {
+            error("nope");
+
+        }
+        elif (a == 342) {
+            error("nope");
+
+        }
+        elif (a == 2362) {
+            error("nope");
+
+        }
+        elif (a == 782) {
+            error("nope");
+
+        }
+        elif (a == 2222) {
+            error("nope");
+
+        }
+        elif (a == 25236) {
+            error("nope");
+
+        }
+        elif (a == 3742) {
+            error("nope");
+
+        }
+        elif (a == 2437) {
+            error("nope");
+
+        }
+        elif (a == 3472) {
+            error("nope");
+        }
+        elif (a == 1997) {
+            let r = 12;
+            if (r == 1112) {
+                error("nope");
+            } elif (r == 12) {
+            } else {
+                error("nope");
+            }
+        } else {
+            error ("nope");
+        }
+        # Adding an extra elif will result in a compiler error since FH supports only 32 nested elif
+
+        print ("ok\n");
+
+    }
+
+    #-
+    fn main () {
+        let a = 2;
+        if (a == 1) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 4) {
+
+        } elif (a == 2) {
+
+        }
+    }
+    -#

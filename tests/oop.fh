@@ -1,0 +1,73 @@
+fn classHero(  name, age, level  ) {
+
+    let self = {};
+
+    let super = {};
+    extends(super, classBaseHero());
+
+    return self = {
+        "init" : fn () {
+            self.name = name;
+            self.age = age;
+            self.level = level;
+
+            println(super.FH());
+        },
+        "show_stats" : fn () {
+            println("Name: ", self.name, " Age: ", self.age, " Level: ", self.level);
+        },
+        "attack" : fn() {
+            #- !!Note!!
+            We defined 'damage' here and not in the init fn,
+            this is not a good practice :) -#
+            self.damage = 2;
+        },
+        "update" : fn() {
+            println(self.name, " just dealt ", self.damage, " damage !");
+        },
+
+        # Getters
+        "getName" : fn() {
+            return self.name;
+        },
+        "getAge" : fn() {
+            return self.age;
+        },
+        "getLevel" : fn() {
+            return self.level;
+        },
+
+        #- Setters (not needed in this example but they might become needed
+        when you want to mutate the value(s) of 'self' -#
+        "setLevel" : fn (new_level) {
+            self.level = new_level;
+        },
+    };
+}
+
+fn classBaseHero() {
+    return {
+        'FH': fn() {
+            return "yolo";
+        },
+    };
+}
+
+fn main() {
+    let my_hero = classHero("FH", 3, 100);
+
+    my_hero.init();
+    my_hero.show_stats();
+    my_hero.attack();
+    my_hero.update();
+
+    assert(my_hero.getName() == "FH");
+    assert(my_hero.getAge() == 3);
+    assert(my_hero.getLevel() == 100);
+    my_hero.setLevel(101);
+    assert(my_hero.getLevel() == 101);
+
+    #- Not necessary needed but in bigger applications setting your classes
+    or objects to 'null' can help the Garbage collector! -#
+    my_hero = null;
+}

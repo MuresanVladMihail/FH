@@ -1,0 +1,105 @@
+fn main() {
+    let start = os_time();
+
+    let a = "Hello ";
+    let b = "world";
+    let c = a + b + "!";
+    assert (c == "Hello world!");
+
+    let a = "Hello number ";
+    let b = 47;
+    let c = a + b + " !";
+    assert (c == "Hello number 47 !");
+
+    let a = 47;
+    let b = " is my number";
+    let c = a + b + " !";
+    assert (c == "47 is my number !");
+
+    assert(string_upper("fh") == "FH");
+    assert(string_lower("FH") == "fh");
+
+    assert(string_find("FH is an awesome language which compiles to native code",
+                "bytecode") == -1);
+    assert(string_find("FH is an awesome language which compiles to bytecode",
+                "bytecode") != 0);
+
+    let a = "foo will be 22 years old in november";
+    let index = string_find(a, "years old");
+    let c = string_substr(a, index, len("years old"));
+    assert (c == "years old");
+
+    assert(string_reverse("foo") == "oof");
+
+    assert(string_char("f") == 54);
+    assert(string_char(54) == 'f');
+
+    let final = os_time();
+
+    let DIF = os_difftime(start, final);
+    assert(DIF > 0);
+    assert(len(os_localtime()) > 0);
+
+    let trim = "    FH rules!         ";
+    let len_trim = len(trim);
+    assert(len(string_trim(trim)) < len_trim);
+    assert(string_trim(trim) == "FH rules!");
+
+	trim = "fh";
+	assert(string_trim(trim) == "fh");
+
+    assert(len(os_getenv("PATH")) > 0);
+
+    assert(os_getOS() != "unknown");
+
+    let convert = 3.14;
+    convert = tostring(convert);
+    assert(convert == "3.14");
+
+    assert(len(getversion()) > 0);
+    assert(tonumber("3.14") == 3.14);
+
+    assert(string_format("foo is king") == "foo is king");
+    assert(string_format("%d %g %f Is: %s", 52.23, 42.4200, 42.200, "yolo") ==
+            "52 42.42 42.200000 Is: yolo");
+
+    assert(string_join(":", "23", "00", "32") == "23:00:32");
+    assert(string_join(" is awesome", "fh") == "fh is awesome");
+
+    let split = string_split("vladyzeyzmareyzdomn!", 'yz');
+    let split_str = "";
+    for (let i = 0; i < len(split); i = i + 1) {
+        split_str = split_str + split[i];
+    }
+    assert(split_str == 'vlademaredomn!');
+
+    let split = string_split("hello,there,world!", ',');
+    let split_str = "";
+    for (let i = 0; i < len(split); i = i + 1) {
+        split_str = split_str + split[i] + ' ';
+    }
+    assert(split_str == 'hello there world! ');
+
+    let str = "How are you doing today?";
+
+    let split = string_split(str, ' ');
+    let split_str = "";
+    for (let i = 0; i < len(split); i = i + 1) {
+        split_str = split_str + split[i];
+    }
+    assert(split_str == 'Howareyoudoingtoday?');
+    assert(str == "How are you doing today?");
+
+    let slice = string_slice("vlad e mare", len("vlad"));
+    assert(type(slice) == 'array');
+    assert(slice[0] == 'vlad');
+    assert(slice[1] == ' e mare');
+
+    slice = string_slice("one two three four", 3, 7);
+    assert(type(slice) == 'array');
+    assert(slice[0] == 'one');
+    assert(slice[1] == ' two');
+    assert(slice[2] == ' three four');
+
+    print("ok\n");
+}

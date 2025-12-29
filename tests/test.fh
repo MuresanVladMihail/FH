@@ -1,0 +1,30 @@
+
+fn test(x)
+{
+    printf("In fn test(), x=%s\n", x);
+}
+
+fn main() {
+    let start = os_time();
+    print("Hello, World!\n");
+    let a;
+    let i = 0;
+    while (i < 10) {
+        if (i == 5) {
+            printf("skipping 5\n");
+            i = i + 1;
+            continue;
+        }
+        []; # create garbage
+        printf("i=%d\n", i);
+        i = i + 1;
+    }
+
+    gc();
+    test("hi");
+    let final = os_time();
+
+    let DIF = os_difftime(start, final);
+    println('It took: ', DIF, ' ms to execute the program');
+    return 0;
+}

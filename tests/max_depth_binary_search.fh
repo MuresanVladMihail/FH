@@ -1,0 +1,62 @@
+#-Given a binary tree, find its maximum depth.
+
+The maximum depth is the number of nodes along the longest path from the root node down to the farthest leaf node.
+
+Note: A leaf is a node with no children.
+
+Example:
+
+Given binary tree [3,9,20,null,null,15,7],
+
+    3
+   / \
+  9  20
+    /  \
+   15   7
+return its depth = 3.
+-#
+
+
+fn depth(root, level) {
+    if (type(root) != 'map') { 
+        return level;
+    }
+    level = level + 1;
+    let ld = depth(root.left, level);
+    let rd = depth(root.right, level);
+    return ld > rd && ld || rd;
+}
+
+fn main() {
+    let treeNode = fn() {
+        let self = {};
+        self.val = 0;
+        self.left = fn();
+        self.right = fn();
+        return self;
+    };
+
+    let root = treeNode();
+    let initTree = fn(root) {
+        root.val = 3;
+
+        root.left = treeNode();
+        root.left.val = 9;
+
+        root.right = treeNode();
+        root.right.val = 20;
+
+        root.right.right = treeNode();
+        root.right.right.val = 7;
+
+        root.right.left = treeNode();
+        root.right.left.val = 15;
+    }(root);
+
+    let maxDepth = fn(root) {
+        return depth(root, 0);
+    };
+
+    println(maxDepth(root));
+
+}
