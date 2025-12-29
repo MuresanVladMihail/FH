@@ -1863,23 +1863,28 @@ static int fn_has(struct fh_program *prog, struct fh_value *ret, struct fh_value
     return fh_set_error(prog, "Expected an array or a map as the second argument.");
 }
 
-static int fn_assert(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (n_args == 0) {
-        return fh_set_error(prog, "Expected condition to assert agains");
+static bool fh_is_truthy(const struct fh_value *v) {
+    switch (v->type) {
+        case FH_VAL_NULL: return false;
+        case FH_VAL_BOOL: return v->data.b;
+        case FH_VAL_FLOAT: return v->data.num != 0.0;
+        default:
+            return v->data.obj != NULL;
     }
+}
 
-    if (!GET_VAL_OBJ(&args[0])) {
-        if (n_args == 1)
-            return fh_set_error(prog, "assert() failed!");
-        else if (n_args == 2) {
-            if (fh_is_string(&args[1]))
-                return fh_set_error(prog, "assert() failed! Reason: %s", fh_get_string(&args[1]));
-            return fh_set_error(prog, "assert() failed!");
-        }
+static int fn_assert(struct fh_program *prog, struct fh_value *ret,
+                     struct fh_value *args, int n_args) {
+    if (n_args < 1 || n_args > 2)
+        return fh_set_error(prog, "assert() expects 1 or 2 arguments");
+
+    if (!fh_is_truthy(&args[0])) {
+        if (n_args == 2 && fh_is_string(&args[1]))
+            return fh_set_error(prog, "assert() failed: %s", fh_get_string(&args[1]));
+        return fh_set_error(prog, "assert() failed!");
     }
 
     *ret = fh_new_bool(true);
-
     return 0;
 }
 

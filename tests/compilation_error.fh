@@ -1,5 +1,6 @@
 
-fn f()
+fn main()
 {
-    x = 1;
+    let x = 0
+    let c = 3;
 }

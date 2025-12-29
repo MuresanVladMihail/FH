@@ -17,8 +17,7 @@ static struct fh_p_stmt_block *parse_block(struct fh_parser *p, struct fh_token 
 
 static struct fh_p_expr *parse_func(struct fh_parser *p);
 
-static struct fh_p_expr *parse_expr(struct fh_parser *p,
-                                    bool consume_stop, char *stop_chars);
+static struct fh_p_expr *parse_expr(struct fh_parser *p, bool consume_stop, char *stop_chars);
 
 static struct fh_p_stmt *parse_stmt(struct fh_parser *p);
 
@@ -558,7 +557,7 @@ static struct fh_p_expr *parse_expr(struct fh_parser *p, bool consume_stop, char
             push_opn(&opns, expr);
             continue;
         }
-        /* postfix let a = 0; --/++a; */
+        /* postfix prefix let a = 0; --/++a; */
         if (!expect_opn && tok.type == TOK_OP) {
             const char *opname = fh_get_token_op(&tok);
             if (opname && (strcmp(opname, "++") == 0 || strcmp(opname, "--") == 0)) {
@@ -689,6 +688,14 @@ static struct fh_p_expr *parse_expr(struct fh_parser *p, bool consume_stop, char
                 opr_stack_free(oprs);
                 return ret;
             }
+        }
+        if (stop_chars && !consume_stop) {
+            if (tok_is_eof(&tok)) {
+                fh_parse_error_expected(p, p->last_loc, stop_chars);
+                goto err;
+            }
+            fh_parse_error_expected(p, p->last_loc, stop_chars);
+            goto err;
         }
 
         /* unrecognized token */
@@ -972,10 +979,11 @@ static struct fh_p_stmt *parse_stmt(struct fh_parser *p) {
             stmt->data.decl.val = NULL;
         } else if (tok_is_op(&tok, "=")) {
             stmt->data.decl.val = parse_expr(p, true, ";");
-            if (!stmt->data.decl.val)
+            if (!stmt->data.decl.val) {
                 goto err;
+            }
         } else {
-            fh_parse_error_expected(p, tok.loc, "'=', 'export' or ';'");
+            fh_parse_error_expected(p, tok.loc, "'=' or ';'");
             goto err;
         }
         stmt->type = STMT_VAR_DECL;
@@ -1043,7 +1051,6 @@ static struct fh_p_stmt_block *parse_block_after_first_token(
         }
     }
 
-    // suntem la '{' -> parse până la '}'
     while (1) {
         if (get_token(p, tok) < 0)
             goto err;
@@ -1144,7 +1151,7 @@ static struct fh_p_expr *parse_func(struct fh_parser *p) {
         return NULL;
     }
 
-    if (!parse_block_after_first_token(p, &tok, &func->data.func.body, /*allow_semicolon=*/false)) {
+    if (!parse_block_after_first_token(p, &tok, &func->data.func.body, /*allow_semicolon=*/true)) {
         free(func);
         return NULL;
     }

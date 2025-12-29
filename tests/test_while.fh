@@ -17,10 +17,11 @@ fn main()
                 j = j + 1;
             }
         } elif (i == 9) {
-            println('called at 9');
+            i ++;
             continue;
         }
-        print(i, "\n");
-        i = i + 1;
+        assert(i != 9, "Should not be called from here!");
+        i ++;
     }
+    println("ok");
 }

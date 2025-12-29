@@ -8,13 +8,19 @@ fn main() {
     assert(V == 42);
     assert(V * 2 == 84);
     assert(V >> 0 == 42);
-    let V1 = "not-constant";
-    assert(V1 == "not-constant");
+    let V1 = "constant";
+    assert(V1 == "constant");
     let a = V;
     assert(a == 42);
     a = 43;
     assert(a == 43);
-    let PE = a;
-    assert(PE == 43);
+    let I_AM_A_CONSTANT = a;
+    assert(I_AM_A_CONSTANT == 43);
+    let C = [1,2,3];
+    for (let i =0; i < len(C); i++) {
+        assert(C[i] != null);
+    }
+    let D = {'hi':2};
+    assert(D['hi']==2);
     print("ok\n");
 }

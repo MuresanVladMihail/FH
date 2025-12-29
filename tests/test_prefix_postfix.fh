@@ -1,3 +1,5 @@
+fn id(v) { return v; }
+
 fn main() {
     let x = 1;
     x++;
@@ -17,5 +19,26 @@ fn main() {
     assert(m.k == 2);
     assert(++m.k == 3);
 
-    print("ok\n");
+    let c = 1;
+    assert(id(c++) == 1);
+    assert(c == 2);
+
+    let d = [0];
+    assert(id(d[0]++) == 0);
+    assert(d[0] == 1);
+
+    let e = [0];
+    assert((e[0]++) + (e[0]++) == 1); # 0 + 1
+    assert(e[0] == 2);
+
+    let v = 0;
+    assert(v++ + ++v, 2);
+
+    let arr = [0];
+    assert(arr[0]++ + ++arr[0], 2);
+
+    # let x = 0;
+    # print(x = x + 1 = x++);
+
+    println("ok\n");
 }
