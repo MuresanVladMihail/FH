@@ -2059,9 +2059,9 @@ static int fn_grow(struct fh_program *prog, struct fh_value *ret, struct fh_valu
         return -1;
 
     if (!fh_is_number(&args[1]))
-        return fh_set_error(prog, "grow(): argument 2 must be a number");
-    else if (fh_get_number(&args[1]) < 0)
-        return fh_set_error(prog, "Expected unsigned number value for argument 2");
+        return fh_set_error(prog, "grow(): argument 2 (size) must be a number");
+    if (fh_get_number(&args[1]) < 0)
+        return fh_set_error(prog, "Expected positive number value for argument 2 (size)");
 
     unsigned int size = fh_get_number(&args[1]);
 

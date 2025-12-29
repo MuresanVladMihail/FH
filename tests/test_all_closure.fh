@@ -1,0 +1,202 @@
+#
+# Comprehensive closure & upvalue test suite
+#
+
+fn assert_eq(a, b, msg) {
+    if (a != b) {
+        printf("ASSERT FAILED: %s | got=%d expected=%d\n", msg, a, b);
+        error("assert failed");
+    }
+}
+
+#
+# 1. Basic independent counters
+#
+fn make_counter(n) {
+    return {
+        "next": fn() {
+            n = n + 1;
+        },
+        "read": fn() {
+            return n;
+        }
+    };
+}
+
+fn test_basic_counters() {
+    let c1 = make_counter(0);
+    let c2 = make_counter(10);
+
+    c1.next();
+    c2.next();
+
+    assert_eq(c1.read(), 1, "c1 after 1 increment");
+    assert_eq(c2.read(), 11, "c2 after 1 increment");
+
+    c1.next();
+    assert_eq(c1.read(), 2, "c1 after 2 increments");
+    assert_eq(c2.read(), 11, "c2 unchanged");
+}
+
+#
+# 2. Multiple closures sharing same upvalue
+#
+fn make_pair(n) {
+    let inc = fn() { n = n + 1; };
+    let read = fn() { return n; };
+    return [inc, read];
+}
+
+fn test_shared_upvalue() {
+    let p = make_pair(5);
+    p[0]();
+    p[0]();
+    assert_eq(p[1](), 7, "shared upvalue updated");
+}
+
+#
+# 3. Nested closures
+#
+fn nested(a) {
+    return fn(b) {
+        return fn(c) {
+            return a + b + c;
+        };
+    };
+}
+
+fn test_nested_closures() {
+    let f = nested(1);
+    let g = f(2);
+    assert_eq(g(3), 6, "nested closure sum");
+}
+
+#
+# 4. Closure capturing loop variable
+#
+fn make_loop_counters() {
+    let arr = [];
+    grow(arr, 3);
+    let i = 0;
+    while (i < 3) {
+        let x = i;
+        arr[i] = fn() { return x; };
+        i = i + 1;
+    }
+    return arr;
+}
+
+fn test_loop_capture() {
+    let cs = make_loop_counters();
+    assert_eq(cs[0](), 0, "loop capture 0");
+    assert_eq(cs[1](), 1, "loop capture 1");
+    assert_eq(cs[2](), 2, "loop capture 2");
+}
+
+#
+# 5. Upvalue closed after return
+#
+fn make_reader() {
+    let v = 42;
+    return fn() { return v; };
+}
+
+fn test_close_on_return() {
+    let r = make_reader();
+    assert_eq(r(), 42, "value survives return");
+}
+
+#
+# 6. Mutation after function return
+#
+fn make_mutable() {
+    let v = 1;
+    return fn() {
+        v = v + 1;
+        return v;
+    };
+}
+
+fn test_mutation_after_return() {
+    let f = make_mutable();
+    assert_eq(f(), 2, "mutation 1");
+    assert_eq(f(), 3, "mutation 2");
+}
+
+#
+# 7. Shadowing vs upvalue
+#
+fn shadow_test() {
+    let x = 10;
+    let f = fn() {
+        let x = 20;
+        return x;
+    };
+    let g = fn() {
+        return x;
+    };
+    return [f, g];
+}
+
+fn test_shadowing() {
+    let p = shadow_test();
+    assert_eq(p[0](), 20, "inner shadow");
+    assert_eq(p[1](), 10, "outer upvalue");
+}
+
+#
+# 8. Closure stored in map
+#
+fn test_map_closure() {
+    let x = 5;
+    let m = {
+        "f": fn() { return x; }
+    };
+    x = 9;
+    assert_eq(m.f(), 9, "map closure sees updated upvalue");
+}
+
+#
+# 9. Closure calling closure
+#
+fn test_closure_calls() {
+    let x = 1;
+    let inc = fn() { x = x + 1; };
+    let call = fn() { inc(); };
+    call();
+    call();
+    assert_eq(x, 3, "closure calling closure");
+}
+
+#
+# 10. Multiple instances isolation
+#
+fn test_isolation() {
+    let a = make_mutable();
+    let b = make_mutable();
+    a();
+    a();
+    b();
+    assert_eq(a(), 4, "instance A isolated");
+    assert_eq(b(), 3, "instance B isolated");
+}
+
+#
+# RUN ALL TESTS
+#
+fn main() {
+    printf("Running FH closure tests...\n");
+
+    test_basic_counters();
+    test_shared_upvalue();
+    test_nested_closures();
+    test_loop_capture();
+    test_close_on_return();
+    test_mutation_after_return();
+    test_shadowing();
+    test_map_closure();
+    test_closure_calls();
+    test_isolation();
+
+    printf("ok \n");
+}

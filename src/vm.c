@@ -240,7 +240,7 @@ static void close_upval(struct fh_vm *vm) {
 }
 
 static void dump_state(struct fh_vm *vm) {
-    struct fh_vm_call_frame *frame = call_frame_stack_top(&vm->call_stack);
+    const struct fh_vm_call_frame *frame = call_frame_stack_top(&vm->call_stack);
     printf("\n");
     printf("****************************\n");
     printf("***** HALTING ON ERROR *****\n");
