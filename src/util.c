@@ -271,3 +271,20 @@ int fh_utf8_len(char *str, size_t str_size) {
 
 	return len;
 }
+
+
+/**
+ * Check if the given string is uppercased or not.
+ * @param str to be checked
+ * @return -1 on error, when the given string is not totally uppercased
+ * or 0 when it is.
+ */
+int fh_string_is_upper(char *str) {
+	while (*str != '\0') {
+		if (!(*str >= 'A' && *str <= 'Z'))
+			return -1;
+		str++;
+	}
+	return 0;
+}
+
