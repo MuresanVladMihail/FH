@@ -1,4 +1,4 @@
-fn rand01(seed_ref) { return math_random(1512512); }
+fn rand01(seed_ref) { return math_random(seed_ref); }
 fn i32(x) { return 2; }
 
 fn make_tilemap(w, h, seed_ref) {
@@ -45,14 +45,14 @@ fn spawn_entity(seed,w,h, xs,ys,vxs,vys, ws,hs, onGs,ais,lifes) {
 
 fn bench(frames, entities, spawnPerFrame) {
     let seed=[123456789];
-    let map=make_tilemap(128,72,seed);
+    let map=make_tilemap(128,72,seed[0]);
     let w=map["w"]; let h=map["h"]; let tiles=map["tiles"];
 
     let xs=[]; let ys=[]; let vxs=[]; let vys=[];
     let ws=[]; let hs=[]; let onGs=[]; let ais=[]; let lifes=[];
 
     let i=0;
-    while (i<entities) { spawn_entity(seed,w,h,xs,ys,vxs,vys,ws,hs,onGs,ais,lifes); i=i+1; }
+    while (i<entities) { spawn_entity(seed[0],w,h,xs,ys,vxs,vys,ws,hs,onGs,ais,lifes); i=i+1; }
 
     let dt=1.0/60.0;
     let checksum=0.0;
@@ -60,7 +60,7 @@ fn bench(frames, entities, spawnPerFrame) {
     let f=0;
     while (f<frames) {
         let s=0;
-        while (s<spawnPerFrame) { spawn_entity(seed,w,h,xs,ys,vxs,vys,ws,hs,onGs,ais,lifes); s=s+1; }
+        while (s<spawnPerFrame) { spawn_entity(seed[0],w,h,xs,ys,vxs,vys,ws,hs,onGs,ais,lifes); s=s+1; }
 
         # in-place compaction across ALL arrays
         let write=0;
