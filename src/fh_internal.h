@@ -53,7 +53,6 @@ struct fh_value;
 struct fh_vm;
 struct fh_func_def;
 struct fh_closure;
-struct fh_symtab;
 struct fh_tokenizer;
 struct fh_parser;
 struct fh_compiler;
@@ -62,9 +61,6 @@ struct fh_map;
 
 extern const struct fh_named_c_func fh_std_c_funcs[];
 extern const int fh_std_c_funcs_len;
-
-/* Used in map.c to determine the length of each FH type for hashing. */
-uint32_t fh_type_size[11];
 
 uint32_t fh_hash(const void *data, size_t len);
 

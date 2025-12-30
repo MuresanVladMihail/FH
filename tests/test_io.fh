@@ -14,7 +14,7 @@ fn main() {
     io_close(fh);
 
     fh = io_open("tests/write_test.txt");
-    printf('%s\n', io_read(fh));
+    assert(io_read(fh) == "Hello World! :-)\ntrue\nfalse");
     io_close(fh);
 
     io_rename('tests/write_test.txt', 'tests/to_be_removed.txt');

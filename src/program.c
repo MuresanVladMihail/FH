@@ -7,7 +7,7 @@
 #include "program.h"
 #include "fh.h"
 
-void fh_init() {
+void fh_init(void) {
     fh_programs_vector = malloc(sizeof(vec_void_t));
     vec_init(fh_programs_vector);
     fh_is_packed = false;
@@ -15,18 +15,6 @@ void fh_init() {
     fh_started_pack = false;
 
     vec_init(&fh_dynamic_libraries);
-
-    // see fh_internal.h
-    fh_type_size[FH_VAL_NULL] = 0;
-    fh_type_size[FH_VAL_BOOL] = sizeof(bool);
-    fh_type_size[FH_VAL_FLOAT] = sizeof(double);
-    fh_type_size[FH_VAL_C_FUNC] = sizeof(fh_c_func);
-    fh_type_size[FH_VAL_ARRAY] = sizeof(struct fh_array);
-    fh_type_size[FH_VAL_MAP] = sizeof(struct fh_map);
-    fh_type_size[FH_VAL_UPVAL] = sizeof(struct fh_upval);
-    fh_type_size[FH_VAL_CLOSURE] = sizeof(struct fh_closure);
-    fh_type_size[FH_VAL_C_OBJ] = sizeof(struct fh_c_obj);
-    fh_type_size[FH_VAL_FUNC_DEF] = sizeof(struct fh_func_def);
 
     bcrypt_init();
 
@@ -245,9 +233,8 @@ void fh_restore_pin_state(struct fh_program *prog, int state) {
 }
 
 int fh_add_c_func(struct fh_program *prog, const char *name, fh_c_func func) {
-    struct named_c_func **cfn
-            = (struct named_c_func **) map_get(&prog->c_funcs_map, name);
-    if (cfn) {
+    struct named_c_func **cfn = (struct named_c_func **) map_get(&prog->c_funcs_map, name);
+    if (cfn && *cfn) {
         fprintf(stderr, "Error: duplicating C function '%s'!\n", name);
         return -1;
     }
@@ -260,8 +247,7 @@ int fh_add_c_func(struct fh_program *prog, const char *name, fh_c_func func) {
     return 0;
 }
 
-int fh_add_c_funcs(struct fh_program *prog, const struct fh_named_c_func *funcs,
-                   int n_funcs) {
+int fh_add_c_funcs(struct fh_program *prog, const struct fh_named_c_func *funcs, int n_funcs) {
     for (int i = 0; i < n_funcs; i++)
         if (fh_add_c_func(prog, funcs[i].name, funcs[i].func) < 0)
             return -1;
@@ -277,18 +263,17 @@ const char *fh_get_c_func_name(struct fh_program *prog, fh_c_func func) {
 }
 
 fh_c_func fh_get_c_func_by_name(struct fh_program *prog, const char *name) {
-    struct named_c_func **func
-            = (struct named_c_func **) map_get(&prog->c_funcs_map, name);
-    if (func) {
+    struct named_c_func **func = (struct named_c_func **) map_get(&prog->c_funcs_map, name);
+    if (func && *func) {
         return (*func)->func;
     }
     return NULL;
 }
 
 int fh_add_global_func(struct fh_program *prog, struct fh_closure *closure) {
-    struct fh_closure **val = (struct fh_closure **) map_get(
-        &prog->global_funcs_map, GET_OBJ_STRING_DATA(closure->func_def->name));
-    if (val) {
+    struct fh_closure **val = (struct fh_closure **) map_get(&prog->global_funcs_map,
+                                                             GET_OBJ_STRING_DATA(closure->func_def->name));
+    if (val && *val) {
         if (closure->func_def->name != NULL) {
             *val = closure;
             return 0;
@@ -300,7 +285,6 @@ int fh_add_global_func(struct fh_program *prog, struct fh_closure *closure) {
 
 int fh_get_num_global_funcs(struct fh_program *prog) {
     int len = 0;
-    const char *key;
 
     map_iter_t iter = map_iter(&prog->global_funcs_map);
     while ((/*key = */map_next(&prog->global_funcs_map, &iter))) {

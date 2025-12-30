@@ -576,17 +576,13 @@ static struct fh_p_expr *parse_expr(struct fh_parser *p, bool consume_stop, char
                     goto err;
                 }
 
-                struct fh_p_expr *post = new_expr(
-                    p, tok.loc,
-                    (opname[0] == '+') ? EXPR_POST_INC : EXPR_POST_DEC,
-                    0
-                );
+                struct fh_p_expr *post = new_expr(p, tok.loc, (opname[0] == '+') ? EXPR_POST_INC : EXPR_POST_DEC, 0);
                 if (!post) {
                     fh_free_expr(arg);
                     goto err;
                 }
 
-                post->data.postfix.op = (opname[0] == '+') ? AST_OP_INC : AST_OP_DEC;
+                post->data.postfix.op = (opname[0] == '+') ? AST_OP_PRE_INC : AST_OP_PRE_DEC;
                 post->data.postfix.arg = arg;
 
                 push_opn(&opns, post);

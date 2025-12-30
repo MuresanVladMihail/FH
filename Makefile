@@ -6,6 +6,7 @@ LDFLAGS =
 LIBS = -lm -ldl
 
 ifeq ($(OS), Darwin)
+	CC = clang
 	LIBS := $(filter-out -ldl,$(LIBS))
 endif
 ifeq ($(OS), OpenBSD)
@@ -41,7 +42,7 @@ ifeq ($(TARGETS), debug2) # Used for gprof
 	CFLAGS += -O0 -g3 -pedantic-errors -pg -Wall -Wextra -Wundef -no-pie
 endif
 ifeq ($(TARGETS), release)
-	CFLAGS += -O3
+	CFLAGS += -O3 -DNDEBUG -flto -fomit-frame-pointer
 endif
 ifeq ($(TARGETS), asan)
 	CFLAGS += -fsanitize=address -fno-omit-frame-pointer -O -g -Wall -Wextra
@@ -54,8 +55,6 @@ build: fh
 	@echo "Compilation successful!  Try these examples:"
 	@echo
 	@echo "  ./fh tests/test.fh"
-	@echo "  ./fh tests/mandelbrot.fh"
-	@echo "  ./fh tests/mandel_color.fh"
 	@echo
 
 fh: $(OBJS)

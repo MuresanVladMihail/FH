@@ -44,6 +44,7 @@ fn main(args)
     assert(has(a, "hello")[0] == "hello");
 
     let test = [];
+    grow(test, 50);
     insert(test, 50, 'Hi');
     assert(test[50] == 'Hi');
     insert(test, 30, 32);

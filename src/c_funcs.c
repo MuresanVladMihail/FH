@@ -378,7 +378,7 @@ static int fn_math_deg(struct fh_program *prog, struct fh_value *ret, struct fh_
         return fh_set_error(prog, "math_deg(): expected number, got %s", fh_type_to_str(prog, args[0].type));
     }
 
-    *ret = fh_make_number(DEG_TO_RAD(args[0].data.num));
+    *ret = fh_make_number(RAD_TO_DEG(args[0].data.num));
     return 0;
 }
 
@@ -612,39 +612,70 @@ static int fn_math_rad(struct fh_program *prog, struct fh_value *ret, struct fh_
         return fh_set_error(prog, "math_rad(): expected number, got %s", fh_type_to_str(prog, args[0].type));
     }
 
-    *ret = fh_make_number(RAD_TO_DEG(args[0].data.num));
+    *ret = fh_make_number(DEG_TO_RAD(args[0].data.num));
     return 0;
 }
 
+static uint32_t rand_uniform(uint32_t range) {
+    uint32_t x;
+    uint32_t limit = UINT32_MAX - (UINT32_MAX % range);
+    do {
+        x = mt19937_next32(mt19937_generator);
+    } while (x >= limit);
+    return x % range;
+}
+
 static int fn_math_random(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (n_args > 2) {
-        return fh_set_error(prog, "math_random(): invalid number of arguments");
-    }
+    if (n_args > 2)
+        return fh_set_error(prog, "math_random(): expected 0, 1 or 2 arguments");
 
+    /* math_random() -> float [0,1) */
     if (n_args == 0) {
-        /* return 0 or 1 */
-        *ret = fh_make_number(mt19937_next32(mt19937_generator) % 2);
-    } else if (n_args == 1 && fh_is_number(&args[0])) {
-        /* return 0 .. arg0 */
-        *ret = fh_make_number((float)(mt19937_next32(mt19937_generator) % (int)(args[0].data.num+1)));
-    } else if (n_args == 2) {
-        /* return arg0 .. arg1 */
-        int min = (int) args[0].data.num;
-        int max = (int) args[1].data.num;
-        *ret = fh_make_number((float)(mt19937_next32(mt19937_generator) % ((max+1) - min)) + min);
-    } else {
-        return fh_set_error(prog, "math_random(): invalid call");
+        const uint32_t r = mt19937_next32(mt19937_generator);
+        *ret = fh_make_number((double)r / (double)UINT32_MAX);
+        return 0;
     }
 
+    /* Validate args are numbers */
+    if (!fh_is_number(&args[0]) || (n_args == 2 && !fh_is_number(&args[1])))
+        return fh_set_error(prog, "math_random(): arguments must be numbers");
+
+    /* math_random(n) -> int [1..n] */
+    if (n_args == 1) {
+        const int max = (int) fh_get_number(&args[0]);
+        if (max <= 0)
+            return fh_set_error(prog, "math_random(): argument must be > 0");
+
+        const uint32_t r = rand_uniform((uint32_t) max);
+        *ret = fh_make_number((double)(r + 1));
+        return 0;
+    }
+
+    /* math_random(min, max) -> int [min..max] */
+    const int min = (int) fh_get_number(&args[0]);
+    const int max = (int) fh_get_number(&args[1]);
+
+    if (min > max)
+        return fh_set_error(prog, "math_random(): min must be <= max");
+
+    uint32_t range = (uint32_t) (max - min + 1);
+    const uint32_t r = rand_uniform(range);
+
+    *ret = fh_make_number((double)(min + r));
     return 0;
 }
 
 static int fn_math_randomseed(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (n_args == 1 && !fh_is_number(&args[0])) {
-        return fh_set_error(prog, "math_randomseed(): expected number or null, got %s",
-                            fh_type_to_str(prog, args[0].type));
+    uint32_t seed;
+
+    if (n_args == 0) {
+        seed = (uint32_t) time(NULL);
+    } else if (n_args == 1 && fh_is_number(&args[0])) {
+        seed = (uint32_t) fh_get_number(&args[0]);
+    } else {
+        return fh_set_error(prog, "math_randomseed(): expected 0 or 1 number");
     }
-    uint32_t seed = n_args > 0 ? args[0].data.num : time(NULL);
+
     mt19937_seed(mt19937_generator, seed);
     *ret = fh_make_null();
     return 0;
@@ -766,6 +797,7 @@ static int fn_io_tar_read(struct fh_program *prog, struct fh_value *ret, struct 
     c[h.size] = 0;
     err = mtar_read_data(tar, c, h.size);
     if (err != MTAR_ESUCCESS) {
+        free(c);
         return fh_set_error(prog, "Couldn't read file: %s", file);
     }
 
@@ -941,12 +973,14 @@ static int fn_io_read(struct fh_program *prog, struct fh_value *ret, struct fh_v
         FILE *fp = fh_get_c_obj_value(&args[0]);
 
         fseek(fp, 0, SEEK_END);
-        size_t len = ftell(fp);
+        const long len = ftell(fp);
+        if (len < 0)
+            return fh_set_error(prog, "io_read(): couldn't determine file size");
         rewind(fp);
 
         char *read = malloc(sizeof(char) * len + 1);
 
-        size_t ret_read = fread(read, sizeof(char), len, fp);
+        const size_t ret_read = fread(read, sizeof(char), len, fp);
         read[len] = '\0';
 
         if (len != ret_read) {
@@ -1406,6 +1440,8 @@ static int fn_string_substr(struct fh_program *prog, struct fh_value *ret, struc
     int len = (int) fh_get_number(&args[2]);
     if (len < 0 || start < 0)
         return fh_set_error(prog, "cannot have a negative start or length");
+    if (start >= (int) strlen(str))
+        return fh_set_error(prog, "start index out of bounds");
     char *ret_str = substr(str, start, len);
     *ret = fh_new_string(prog, ret_str);
     free(ret_str);
@@ -1437,27 +1473,48 @@ static int fn_string_join(struct fh_program *prog, struct fh_value *ret, struct 
                             fh_type_to_str(prog, args[0].type));
 
     const char *join = GET_OBJ_STRING_DATA((&args[0])->data.obj);
+    size_t join_len = strlen(join);
 
-    char *res = NULL;
-
-    for (size_t i = 1; i < n_args; i++) {
+    // Validate all args and compute total length
+    size_t total = 0;
+    for (int i = 1; i < n_args; i++) {
         if (!fh_is_string(&args[i])) {
-            free(res);
-            return fh_set_error(prog, "Expected string for parameter %zu, got %s\n", i,
+            return fh_set_error(prog, "Expected string for parameter %d, got %s\n", i,
                                 fh_type_to_str(prog, args[i].type));
         }
-        const char *val = GET_OBJ_STRING_DATA((&args[i])->data.obj);
-
-        res = str_append(res, val);
-        /* Prevent adding the "join" string to the last element when there's more than one value,
-         *  eg: join = ':', val: 23, 00, 32 -> 23:00:32: */
-        if (n_args > 2) {
-            if (i < n_args - 1)
-                res = str_append(res, join);
-        } else
-            res = str_append(res, join);
+        total += strlen(GET_OBJ_STRING_DATA((&args[i])->data.obj));
+        if (n_args == 2) {
+            // old behavior: always append join once
+            total += join_len;
+        } else {
+            // join only between elements
+            if (i < n_args - 1) total += join_len;
+        }
     }
 
+    char *res = malloc(total + 1);
+    if (!res) return fh_set_error(prog, "string_join(): out of memory");
+    char *p = res;
+
+    for (int i = 1; i < n_args; i++) {
+        const char *val = GET_OBJ_STRING_DATA((&args[i])->data.obj);
+        size_t val_len = strlen(val);
+
+        memcpy(p, val, val_len);
+        p += val_len;
+
+        if (n_args == 2) {
+            memcpy(p, join, join_len);
+            p += join_len;
+        } else {
+            if (i < n_args - 1) {
+                memcpy(p, join, join_len);
+                p += join_len;
+            }
+        }
+    }
+
+    *p = '\0';
     *ret = fh_new_string(prog, res);
     free(res);
     return 0;
@@ -1704,10 +1761,13 @@ static int fn_tostring(struct fh_program *prog, struct fh_value *ret, struct fh_
     if (!fh_is_number(&args[0]))
         return fh_set_error(prog, "expected number, got: %s", fh_type_to_str(prog, args[0].type));
 
-    int require = snprintf(NULL, 0, "%f", args[0].data.num);
-    require = require <= 0 ? 32 : require;
-    char *buffer = malloc(sizeof(char) * (size_t) require + 1);
-    snprintf(buffer, require, "%g", args[0].data.num);
+    int needed = snprintf(NULL, 0, "%g", args[0].data.num);
+    if (needed < 0) needed = 32;
+
+    char *buffer = malloc((size_t) needed + 1);
+    if (!buffer) return fh_set_error(prog, "tostring(): out of memory");
+
+    snprintf(buffer, (size_t)needed + 1, "%g", args[0].data.num);
     *ret = fh_new_string(prog, buffer);
     free(buffer);
 
@@ -1756,9 +1816,6 @@ static int fn_gc_frequency(struct fh_program *prog, struct fh_value *ret, struct
     (void) n_args;
 
     int64_t frequency = (uint64_t) fh_get_number(&args[0]);
-    if (frequency < 1000000) {
-        frequency = 1000000;
-    }
 
     prog->gc_collect_at = frequency;
 
@@ -1904,21 +1961,26 @@ static int fn_len(struct fh_program *prog, struct fh_value *ret, struct fh_value
     if (check_n_args(prog, "len()", 1, n_args))
         return -1;
 
-    struct fh_array *arr = GET_VAL_ARRAY(&args[0]);
-    if (arr) {
-        *ret = fh_make_number(arr->len);
-        return 0;
+    switch (args->type) {
+        case FH_VAL_ARRAY: {
+            const struct fh_array *arr = GET_VAL_ARRAY(&args[0]);
+            *ret = fh_make_number(arr->len);
+            return 0;
+        }
+        case FH_VAL_MAP: {
+            const struct fh_map *map = GET_VAL_MAP(&args[0]);
+            *ret = fh_make_number(map->len);
+            return 0;
+        }
+        case FH_VAL_STRING: {
+            const struct fh_string *string = GET_VAL_STRING(&args[0]);
+            *ret = fh_make_number(string->size - 1);
+            return 0;
+        }
+        default:
+            break;
     }
-    struct fh_map *map = GET_VAL_MAP(&args[0]);
-    if (map) {
-        *ret = fh_make_number(map->len);
-        return 0;
-    }
-    struct fh_string *string = GET_VAL_STRING(&args[0]);
-    if (string) {
-        *ret = fh_make_number(string->size - 1);
-        return 0;
-    }
+
     return fh_set_error(prog, "len(): argument 1 must be an array, map or string, got %s",
                         fh_type_to_str(prog, args[0].type));
 }
@@ -1986,9 +2048,9 @@ static int fn_reset(struct fh_program *prog, struct fh_value *ret, struct fh_val
     struct fh_map *map = GET_VAL_MAP(&args[0]);
     if (!map) {
         struct fh_array *arr = GET_VAL_ARRAY(&args[0]);
-        fh_reset_array(arr);
         if (!arr)
             return fh_set_error(prog, "reset(): argument 1 must be a map or array");
+        fh_reset_array(arr);
     } else {
         fh_reset_map(map);
     }
@@ -2050,7 +2112,12 @@ static int fn_insert(struct fh_program *prog, struct fh_value *ret, struct fh_va
     if (!fh_is_number(&args[1]))
         return fh_set_error(prog, "insert(): argument 2 must be a number");
 
-    int index = fh_get_number(&args[1]);
+    const int index = fh_get_number(&args[1]);
+    if (index < 0)
+        return fh_set_error(prog, "insert(): argument 2 (index) must be a non-negative number");
+    if ((size_t) index > arr->len) {
+        return fh_set_error(prog, "insert(): array index out of bounds: %d", index);
+    }
     struct fh_value *new_items = fh_grow_array_object(prog, arr, index + 1);
     if (!new_items)
         return fh_set_error(prog, "out of memory");
@@ -2076,9 +2143,10 @@ static int fn_grow(struct fh_program *prog, struct fh_value *ret, struct fh_valu
         *ret = args[0];
     } else if (fh_is_string(&args[0])) {
         const char *string = fh_get_string(&args[0]);
-        char ns[size];
-        strcpy(ns, string);
-        *ret = fh_new_string(prog, ns);
+        char *new_string = calloc(size + 1, 1);
+        strcpy(new_string, string);
+        *ret = fh_new_string(prog, new_string);
+        free(new_string);
     } else {
         return fh_set_error(prog, "grow(): argument 1 must be an array or string");
     }

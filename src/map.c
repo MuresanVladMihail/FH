@@ -8,11 +8,53 @@
 
 #define OCCUPIED(e) ((e)->key.type != FH_VAL_NULL)
 
-static uint32_t val_hash(struct fh_value *val, uint32_t cap) {
-    if (val->type == FH_VAL_STRING)
-        return GET_VAL_STRING(val)->hash & (cap - 1);
+static uint32_t reduce_to_cap(uint32_t h, size_t cap) {
+    if ((cap & (cap - 1)) == 0) {
+        return h & (uint32_t) (cap - 1);
+    }
+    return (uint32_t) (((uint64_t) h * (uint64_t) cap) >> 32);
+}
 
-    return fh_hash2(&val->data, fh_type_size[val->type], cap);
+static uint32_t val_hash(const struct fh_value *val, uint32_t cap) {
+    uint32_t h;
+
+    switch (val->type) {
+        case FH_VAL_STRING:
+            h = GET_VAL_STRING(val)->hash;
+            break;
+
+        case FH_VAL_BOOL:
+            h = fh_hash(&val->data.b, sizeof(bool));
+            break;
+
+        case FH_VAL_FLOAT:
+            h = fh_hash(&val->data.num, sizeof(double));
+            break;
+
+        case FH_VAL_C_FUNC:
+            h = fh_hash(&val->data.c_func, sizeof(fh_c_func));
+            break;
+
+        case FH_VAL_ARRAY:
+        case FH_VAL_MAP:
+        case FH_VAL_UPVAL:
+        case FH_VAL_CLOSURE:
+        case FH_VAL_C_OBJ:
+        case FH_VAL_FUNC_DEF:
+            // identity-based hashing (pointer)
+            h = fh_hash(&val->data.obj, sizeof(void *));
+            break;
+
+        case FH_VAL_NULL:
+            h = 0;
+            break;
+
+        default:
+            h = 0;
+            break;
+    }
+
+    return reduce_to_cap(h, cap);
 }
 
 
@@ -25,7 +67,7 @@ static uint32_t find_slot(struct fh_map_entry *entries, uint32_t cap, struct fh_
 
 static uint32_t insert(struct fh_map_entry *entries, uint32_t cap,
                        struct fh_value *key, struct fh_value *val) {
-    uint32_t i = find_slot(entries, cap, key);
+    const uint32_t i = find_slot(entries, cap, key);
     // printf("-> inserting k="); fh_dump_value(key);
     // printf("; val="); fh_dump_value(val);
     // printf(" at position %u (occupied=%d)\n", i, OCCUPIED(&entries[i]));
@@ -95,7 +137,7 @@ int fh_get_map_object_value(struct fh_map *map, struct fh_value *key, struct fh_
     if (map->cap == 0)
         return -1;
 
-    uint32_t i = find_slot(map->entries, map->cap, key);
+    const uint32_t i = find_slot(map->entries, map->cap, key);
     if (!OCCUPIED(&map->entries[i]))
         return -1;
     *val = map->entries[i].val;
@@ -119,7 +161,7 @@ int fh_add_map_object_entry(struct fh_program *prog, struct fh_map *map,
     }
 
     if (map->cap == 0 || map->len + 1 > map->cap >> 1) {
-        if (rebuild(map, (map->cap == 0) ? 8 : map->cap << 1) < 0) {
+        if (rebuild(map, (map->cap == 0) ? 16 : map->cap << 1) < 0) {
             fh_set_error(prog, "out of memory");
             return -1;
         }
@@ -182,19 +224,32 @@ int fh_delete_map_object_entry(struct fh_map *map, struct fh_value *key) {
     return 0;
 }
 
-int fh_alloc_map_object_len(struct fh_map *map, uint32_t len) {
-    // round len up to the nearest power of 2
-    len--;
-    len |= len >> 1;
-    len |= len >> 2;
-    len |= len >> 4;
-    len |= len >> 8;
-    len |= len >> 16;
-    len++;
+static int map_reserve_empty(struct fh_map *map, uint32_t len_pow2_cap) {
+    size_t cap_size = len_pow2_cap * sizeof(struct fh_map_entry);
+    struct fh_map_entry *entries = malloc(cap_size);
+    if (!entries) return -1;
+    memset(entries, 0, cap_size);
+    free(map->entries);
+    map->entries = entries;
+    map->cap = len_pow2_cap;
+    return 0;
+}
 
-    if (len < map->len)
-        return -1;
+int fh_alloc_map_object_len(struct fh_map *map, const uint32_t len) {
+    if (map->cap == 0) return map_reserve_empty(map, len << 1);
     return rebuild(map, len << 1);
+    // // round len up to the nearest power of 2
+    // len--;
+    // len |= len >> 1;
+    // len |= len >> 2;
+    // len |= len >> 4;
+    // len |= len >> 8;
+    // len |= len >> 16;
+    // len++;
+    //
+    // if (len < map->len)
+    //     return -1;
+    // return rebuild(map, len << 1);
 }
 
 /* value functions */
@@ -221,7 +276,7 @@ int fh_next_map_key(struct fh_value *map, struct fh_value *key, struct fh_value 
 }
 
 int fh_get_map_value(struct fh_value *map, struct fh_value *key, struct fh_value *val) {
-    struct fh_map *m = GET_VAL_MAP(map);
+    struct fh_map *m = map->data.obj; //GET_VAL_MAP(map);
     if (!m)
         return -1;
     return fh_get_map_object_value(m, key, val);
@@ -229,7 +284,7 @@ int fh_get_map_value(struct fh_value *map, struct fh_value *key, struct fh_value
 
 int fh_add_map_entry(struct fh_program *prog, struct fh_value *map,
                      struct fh_value *key, struct fh_value *val) {
-    struct fh_map *m = GET_VAL_MAP(map);
+    struct fh_map *m = map->data.obj; //GET_VAL_MAP(map);
     if (!m)
         return -1;
     return fh_add_map_object_entry(prog, m, key, val);

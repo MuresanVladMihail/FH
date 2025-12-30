@@ -19,7 +19,7 @@ void fh_init_vm(struct fh_vm *vm, struct fh_program *prog) {
     vm->last_error_loc = fh_make_src_loc(0, 0, 0);
     vm->last_error_addr = -1;
     vm->last_error_frame_index = -1;
-    call_frame_stack_init(&vm->call_stack);
+    call_frame_stack_init_cap(&vm->call_stack, 8192);
 }
 
 void fh_destroy_vm(struct fh_vm *vm) {
@@ -48,28 +48,60 @@ static int ensure_stack_size(struct fh_vm *vm, size_t size) {
     return 0;
 }
 
+// static struct fh_vm_call_frame *prepare_call(struct fh_vm *vm, struct fh_closure *closure, int ret_reg, int n_args) {
+//     const struct fh_func_def *func_def = closure->func_def;
+//
+//     if (ensure_stack_size(vm, ret_reg + 1 + func_def->n_regs) < 0)
+//         return NULL;
+//     if (n_args < func_def->n_params)
+//         memset(vm->stack + ret_reg + 1 + n_args, 0, (func_def->n_params - n_args) * sizeof(struct fh_value));
+//
+//     memset(vm->stack + ret_reg + 1 + func_def->n_params, 0,
+//            (func_def->n_regs - func_def->n_params) * sizeof(struct fh_value));
+//
+//     struct fh_vm_call_frame *frame = call_frame_stack_push(&vm->call_stack, NULL);
+//     if (!frame) {
+//         vm_error(vm, "out of memory");
+//         return NULL;
+//     }
+//     frame->closure = closure;
+//     frame->base = ret_reg + 1;
+//     frame->ret_addr = NULL;
+//     frame->stack_top = frame->base + closure->func_def->n_regs;
+//
+//     return frame;
+// }
+static inline void fh_null_regs(struct fh_value *p, int count) {
+    for (int i = 0; i < count; i++) {
+        p[i].type = FH_VAL_NULL;
+        p[i].data.obj = NULL;
+    }
+}
+
 static struct fh_vm_call_frame *prepare_call(struct fh_vm *vm, struct fh_closure *closure, int ret_reg, int n_args) {
     const struct fh_func_def *func_def = closure->func_def;
 
-    if (ensure_stack_size(vm, ret_reg + 1 + func_def->n_regs) < 0)
+    if (ensure_stack_size(vm, (size_t) ret_reg + 1u + (size_t) func_def->n_regs) < 0)
         return NULL;
-    if (n_args < func_def->n_params)
-        memset(vm->stack + ret_reg + 1 + n_args, 0,
-           (func_def->n_params - n_args) * sizeof(struct fh_value));
 
-    memset(vm->stack + ret_reg + 1 + func_def->n_params, 0,
-           (func_def->n_regs - func_def->n_params) * sizeof(struct fh_value));
+    const int base = ret_reg + 1;
+
+    // Args are already copied into [base .. base+n_args)
+    // Only mark remaining regs as NULL (cheaper than memset full structs)
+    if (n_args < func_def->n_regs) {
+        fh_null_regs(vm->stack + base + n_args, func_def->n_regs - n_args);
+    }
 
     struct fh_vm_call_frame *frame = call_frame_stack_push(&vm->call_stack, NULL);
     if (!frame) {
         vm_error(vm, "out of memory");
         return NULL;
     }
-    frame->closure = closure;
-    frame->base = ret_reg + 1;
-    frame->ret_addr = NULL;
-    frame->stack_top = frame->base + closure->func_def->n_regs;
 
+    frame->closure = closure;
+    frame->base = base;
+    frame->ret_addr = NULL;
+    frame->stack_top = base + func_def->n_regs;
     return frame;
 }
 
@@ -118,15 +150,19 @@ int fh_call_vm_function(struct fh_vm *vm, struct fh_closure *closure,
 
     struct fh_vm_call_frame *prev_frame = call_frame_stack_top(&vm->call_stack);
     int ret_reg = (prev_frame) ? prev_frame->base + prev_frame->closure->func_def->n_regs : 0;
+
     if (ensure_stack_size(vm, ret_reg + n_args + 1) < 0)
         return -1;
-    memset(&vm->stack[ret_reg], 0, sizeof(struct fh_value));
+
+    // memset(&vm->stack[ret_reg], 0, sizeof(struct fh_value));
+    vm->stack[ret_reg].type = FH_VAL_NULL;
+
     if (args)
         memcpy(&vm->stack[ret_reg+1], args, n_args*sizeof(struct fh_value));
 
-    if (n_args < closure->func_def->n_regs)
-        memset(&vm->stack[ret_reg+1+n_args], 0,
-           (closure->func_def->n_regs-n_args)*sizeof(struct fh_value));
+    // if (n_args < closure->func_def->n_regs)
+    // memset(&vm->stack[ret_reg+1+n_args], 0,
+    // (closure->func_def->n_regs-n_args)*sizeof(struct fh_value));
 
     if (!prepare_call(vm, closure, ret_reg, n_args))
         return -1;
@@ -170,50 +206,62 @@ bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
 
     if (v1->type != v2->type)
         return false;
+
     switch (v1->type) {
         case FH_VAL_NULL: return true;
         case FH_VAL_BOOL: return v1->data.b == v2->data.b;
         case FH_VAL_FLOAT: return v1->data.num == v2->data.num;
-        case FH_VAL_C_OBJ: return v1->data.obj == v2->data.obj;
         case FH_VAL_C_FUNC: return v1->data.c_func == v2->data.c_func;
-        case FH_VAL_ARRAY: return v1->data.obj == v2->data.obj;
-        case FH_VAL_MAP: return v1->data.obj == v2->data.obj;
-        case FH_VAL_CLOSURE: return v1->data.obj == v2->data.obj;
-        case FH_VAL_FUNC_DEF: return v1->data.obj == v2->data.obj;
         case FH_VAL_UPVAL: return false;
+        case FH_VAL_C_OBJ:
+        case FH_VAL_ARRAY:
+        case FH_VAL_MAP:
+        case FH_VAL_CLOSURE:
+        case FH_VAL_FUNC_DEF:
+            return v1->data.obj == v2->data.obj;
 
         case FH_VAL_STRING:
-            if (GET_VAL_STRING(v1)->hash != GET_VAL_STRING(v2)->hash)
+            struct fh_string *s1 = GET_VAL_STRING(v1);
+            struct fh_string *s2 = GET_VAL_STRING(v2);
+
+            if (s1->hash != s2->hash)
                 return false;
-            return strcmp(GET_OBJ_STRING_DATA(v1->data.obj), GET_OBJ_STRING_DATA(v2->data.obj)) == 0;
+
+            if (s1->size != s2->size)
+                return false;
+
+            const char *p1 = GET_OBJ_STRING_DATA(v1->data.obj);
+            const char *p2 = GET_OBJ_STRING_DATA(v2->data.obj);
+
+            return memcmp(p1, p2, (size_t) s1->size) == 0;
     }
     return false;
 }
 
 static int vm_assert_index(struct fh_vm *vm, struct fh_value *idx_val, uint32_t *out_index, const char *what) {
-    if (idx_val->type != FH_VAL_FLOAT) {
-        vm_error(vm, "invalid %s access (non-numeric index)", what);
-        return -1;
-    }
+    // if (idx_val->type != FH_VAL_FLOAT) {
+    //     vm_error(vm, "invalid %s access (non-numeric index)", what);
+    //     return -1;
+    // }
+    //
+    // double d = idx_val->data.num;
+    // if (!isfinite(d)) {
+    //     vm_error(vm, "invalid %s access (non-finite index)", what);
+    //     return -1;
+    // }
+    //
+    // if (d < 0.0 || d > (double) UINT32_MAX) {
+    //     vm_error(vm, "invalid %s access (index out of range)", what);
+    //     return -1;
+    // }
+    //
+    // uint32_t idx = (uint32_t) d;
+    // if ((double) idx != d) {
+    //     vm_error(vm, "invalid %s access (non-integer index)", what);
+    //     return -1;
+    // }
 
-    double d = idx_val->data.num;
-    if (!isfinite(d)) {
-        vm_error(vm, "invalid %s access (non-finite index)", what);
-        return -1;
-    }
-
-    if (d < 0.0 || d > (double) UINT32_MAX) {
-        vm_error(vm, "invalid %s access (index out of range)", what);
-        return -1;
-    }
-
-    uint32_t idx = (uint32_t) d;
-    if ((double) idx != d) {
-        vm_error(vm, "invalid %s access (non-integer index)", what);
-        return -1;
-    }
-
-    *out_index = idx;
+    *out_index = idx_val->data.num;
     return 0;
 }
 
@@ -340,9 +388,10 @@ int fh_run_vm(struct fh_vm *vm) {
 
     uint32_t *pc = vm->pc;
     int cmp_test = 0;
+    struct fh_vm_call_frame *frame = NULL;
 
 changed_stack_frame: {
-        struct fh_vm_call_frame *frame = call_frame_stack_top(&vm->call_stack);
+        frame = call_frame_stack_top(&vm->call_stack);
         const_base = frame->closure->func_def->consts;
         reg_base = vm->stack + frame->base;
     }
@@ -369,7 +418,6 @@ changed_stack_frame: {
             }
 
             handle_op(OPC_RET) {
-                struct fh_vm_call_frame *frame = call_frame_stack_top(&vm->call_stack);
                 if (GET_INSTR_RA(instr))
                     vm->stack[frame->base - 1] = *LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
                 else
@@ -391,10 +439,17 @@ changed_stack_frame: {
 
                 uint32_t *ret_addr = frame->ret_addr;
                 call_frame_stack_pop(&vm->call_stack, NULL);
-                if (call_frame_stack_size(&vm->call_stack) == 0 || !ret_addr) {
+                if (!ret_addr) {
                     vm->pc = pc;
                     return 0;
                 }
+
+                frame = call_frame_stack_top(&vm->call_stack);
+                if (!frame || !frame->closure) {
+                    vm->pc = pc;
+                    return 0;
+                }
+
                 pc = ret_addr;
                 goto changed_stack_frame;
             }
@@ -416,14 +471,14 @@ changed_stack_frame: {
                     break;
                 }
                 if (rb->type == FH_VAL_MAP) {
-                    if (rc->type == FH_VAL_NULL) {
-                        *ra = fh_new_null();
-                        break;
-                    }
-                    if (rc->type == FH_VAL_FLOAT && !isfinite(rc->data.num)) {
-                        *ra = fh_new_null();
-                        break;
-                    }
+                    // if (rc->type == FH_VAL_NULL) {
+                    //     *ra = fh_new_null();
+                    //     break;
+                    // }
+                    // if (rc->type == FH_VAL_FLOAT && !isfinite(rc->data.num)) {
+                    //     *ra = fh_new_null();
+                    //     break;
+                    // }
 
                     if (fh_get_map_value(rb, rc, ra) < 0) {
                         *ra = fh_new_null();
@@ -483,7 +538,8 @@ changed_stack_frame: {
                     goto err;
                 if (n_elems != 0) {
                     GC_PIN_OBJ(arr);
-                    struct fh_value *first = fh_grow_array_object(vm->prog, arr, n_elems);
+                    // struct fh_value *first = fh_grow_array_object(vm->prog, arr, n_elems);
+                    struct fh_value *first = fh_grow_array_object_uninit(vm->prog, arr, n_elems);
                     if (!first) {
                         GC_UNPIN_OBJ(arr);
                         goto err;
@@ -503,7 +559,9 @@ changed_stack_frame: {
                 struct fh_map *map = fh_make_map(vm->prog, false);
                 if (!map)
                     goto err;
-                fh_alloc_map_object_len(map, n_elems_half);
+                if (fh_alloc_map_object_len(map, n_elems_half) < 0) {
+                    goto err;
+                }
                 if (n_elems != 0) {
                     GC_PIN_OBJ(map);
                     for (int i = 0; i < n_elems_half; i++) {
@@ -634,16 +692,16 @@ changed_stack_frame: {
                         const char *s2 = GET_OBJ_STRING_DATA(rc->data.obj);
 
                         const size_t len = strlen(s1) + strlen(s2) + 1;
-                        char *concate = malloc(len);
-                        if (!concate) {
+                        char *concat = malloc(len);
+                        if (!concat) {
                             vm_error(vm, "out of memory");
                             goto err;
                         }
 
-                        snprintf(concate, len, "%s%s", s1, s2);
+                        snprintf(concat, len, "%s%s", s1, s2);
 
-                        *ra = fh_new_string(vm->prog, concate);
-                        free(concate);
+                        *ra = fh_new_string(vm->prog, concat);
+                        free(concat);
                     } else if (rc->type == FH_VAL_FLOAT) {
                         int needed = snprintf(NULL, 0, "%s%g", s1, rc->data.num);
                         if (needed < 0) {
@@ -752,11 +810,11 @@ changed_stack_frame: {
 
             handle_op(OPC_CALL) {
                 //dump_regs(vm);
-                struct fh_vm_call_frame *frame = call_frame_stack_top(&vm->call_stack);
                 int ret_reg = (int) (ra - vm->stack); // <- slot absolut (R[A])
                 int n_args = GET_INSTR_RB(instr); // <- B
+                const uint8_t t = ra->type;
 
-                if (ra->type == FH_VAL_CLOSURE) {
+                if (t == FH_VAL_CLOSURE) {
                     struct fh_closure *cl = GET_OBJ_CLOSURE(ra->data.obj);
                     uint32_t *func_addr = cl->func_def->code;
                     /*
@@ -764,16 +822,14 @@ changed_stack_frame: {
                      * or ra after calling it -- jumping to changed_stack_frame fixes it.
                      */
                     struct fh_vm_call_frame *new_frame = prepare_call(vm, cl, ret_reg, n_args);
-
                     if (!new_frame) goto err;
 
                     new_frame->ret_addr = pc;
                     pc = func_addr;
                     goto changed_stack_frame;
                 }
-                if (ra->type == FH_VAL_C_FUNC) {
-                    struct fh_vm_call_frame *new_frame =
-                            prepare_c_call(vm, ret_reg, n_args);
+                if (t == FH_VAL_C_FUNC) {
+                    struct fh_vm_call_frame *new_frame = prepare_c_call(vm, ret_reg, n_args);
                     if (!new_frame) goto err;
 
                     int r = call_c_func(vm, ra->data.c_func,
@@ -784,6 +840,9 @@ changed_stack_frame: {
                     call_frame_stack_pop(&vm->call_stack, NULL);
                     if (r < 0) goto user_err;
                     // still in same bytecode function after C call
+                    frame = call_frame_stack_top(&vm->call_stack);
+                    const_base = frame->closure->func_def->consts;
+                    reg_base = vm->stack + frame->base;
                     break;
                 }
                 vm_error(vm, "call to non-function value");

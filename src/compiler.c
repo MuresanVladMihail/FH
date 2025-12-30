@@ -665,7 +665,7 @@ static int compile_postfix_incdec_to_reg(struct fh_compiler *c, struct fh_p_expr
     if (add_instr(c, loc, MAKE_INSTR_AB(OPC_MOV, dest_reg, tmp)) < 0) return -1;
 
     // tmp = old +/- 1
-    enum fh_bc_opcode opc = (pf->op == AST_OP_INC) ? OPC_INC : OPC_DEC;
+    enum fh_bc_opcode opc = (pf->op == AST_OP_PRE_INC) ? OPC_INC : OPC_DEC;
     if (add_instr(c, loc, MAKE_INSTR_AB(opc, tmp, tmp)) < 0) return -1;
 
     // store back
@@ -930,18 +930,18 @@ static int compile_un_op_to_reg(struct fh_compiler *c, struct fh_src_loc loc, st
         case AST_OP_UNM:
             opc = OPC_NEG;
             break;
-        case AST_OP_INC:
-        case AST_OP_DEC: {
+        case AST_OP_PRE_INC:
+        case AST_OP_PRE_DEC: {
             if (expr->arg->type != EXPR_VAR && expr->arg->type != EXPR_INDEX)
                 return fh_compiler_error(c, loc, "%s operator can only be applied to variables or indexes",
-                                         expr->op == AST_OP_INC ? "increment" : "decrement");
+                                         expr->op == AST_OP_PRE_INC ? "increment" : "decrement");
 
-            int tmp = alloc_reg(c, loc, TMP_VARIABLE);
+            const int tmp = alloc_reg(c, loc, TMP_VARIABLE);
             if (tmp < 0) return -1;
 
             if (compile_load_lvalue_to_reg(c, expr->arg, tmp) < 0) return -1;
 
-            enum fh_bc_opcode opc = (expr->op == AST_OP_INC) ? OPC_INC : OPC_DEC;
+            enum fh_bc_opcode opc = (expr->op == AST_OP_PRE_INC) ? OPC_INC : OPC_DEC;
             if (add_instr(c, loc, MAKE_INSTR_AB(opc, tmp, tmp)) < 0) return -1;
 
             if (compile_store_reg_to_lvalue(c, expr->arg, tmp) < 0) return -1;

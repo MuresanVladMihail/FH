@@ -21,8 +21,8 @@ enum {
     AST_OP_AND,
     AST_OP_RSH,
     AST_OP_LSH,
-    AST_OP_INC,
-    AST_OP_DEC
+    AST_OP_PRE_INC,
+    AST_OP_PRE_DEC
 };
 
 /* =========================================== */

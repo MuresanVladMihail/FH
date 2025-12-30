@@ -91,10 +91,10 @@ int fh_get_array_len(const struct fh_value *val) {
 }
 
 struct fh_value *fh_get_array_item(struct fh_value *val, uint32_t index) {
-    if (val->type != FH_VAL_ARRAY)
-        return NULL;
+    // if (val->type != FH_VAL_ARRAY)
+    // return NULL;
 
-    struct fh_array *arr = GET_OBJ_ARRAY(val->data.obj);
+    const struct fh_array *arr = GET_OBJ_ARRAY(val->data.obj);
     if (index >= arr->len)
         return NULL;
     return &arr->items[index];
@@ -107,6 +107,33 @@ void fh_reset_array(struct fh_array *arr) {
     arr->len = 0;
 }
 
+struct fh_value *fh_grow_array_object_uninit(struct fh_program *prog, struct fh_array *arr, const uint32_t num_items) {
+    // if (arr->header.type != FH_VAL_ARRAY) return NULL;
+
+    const size_t need = (size_t) arr->len + num_items;
+    if (need < (size_t) arr->len ||
+        need > UINT32_MAX) {
+        fh_set_error(prog, "out of memory");
+        return NULL;
+    }
+
+    if (need > arr->cap) {
+        size_t new_cap = arr->cap ? arr->cap : 16;
+        while (new_cap < need) new_cap *= 2;
+        void *new_items = realloc(arr->items, new_cap * sizeof(struct fh_value));
+        if (!new_items) {
+            fh_set_error(prog, "out of memory");
+            return NULL;
+        }
+        arr->items = new_items;
+        arr->cap = (uint32_t) new_cap;
+    }
+
+    struct fh_value *ret = &arr->items[arr->len];
+    arr->len = need;
+    return ret;
+}
+
 struct fh_value *fh_grow_array_object(struct fh_program *prog, struct fh_array *arr, uint32_t num_items) {
     if (arr->header.type != FH_VAL_ARRAY)
         return NULL;
@@ -117,7 +144,7 @@ struct fh_value *fh_grow_array_object(struct fh_program *prog, struct fh_array *
         return NULL;
     }
     if (arr->len + num_items >= arr->cap) {
-        size_t new_cap = ((size_t) arr->len + num_items + 15) / 16 * 16;
+        const size_t new_cap = ((size_t) arr->len + num_items + 15) / 16 * 16;
         void *new_items = realloc(arr->items, new_cap * sizeof(struct fh_value));
         if (!new_items) {
             fh_set_error(prog, "out of memory");
@@ -127,8 +154,9 @@ struct fh_value *fh_grow_array_object(struct fh_program *prog, struct fh_array *
         arr->cap = (uint32_t) new_cap;
     }
     struct fh_value *ret = &arr->items[arr->len];
-    for (uint32_t i = 0; i < num_items; i++)
+    for (uint32_t i = 0; i < num_items; i++) {
         ret[i].type = FH_VAL_NULL;
+    }
     arr->len += num_items;
     return ret;
 }
@@ -152,10 +180,10 @@ const char *fh_get_func_def_name(struct fh_func_def *func_def) {
 
 static void *fh_make_object(struct fh_program *prog, bool pinned,
                             enum fh_value_type type, size_t size) {
-    if (size < sizeof(struct fh_object_header)) {
-        fh_set_error(prog, "object size too small");
-        return NULL;
-    }
+    // if (size < sizeof(struct fh_object_header)) {
+    //     fh_set_error(prog, "object size too small");
+    //     return NULL;
+    // }
 
     if (prog->gc_frequency >= prog->gc_collect_at) {
         fh_collect_garbage(prog);
