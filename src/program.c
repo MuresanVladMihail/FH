@@ -234,7 +234,7 @@ void fh_restore_pin_state(struct fh_program *prog, int state) {
 
 int fh_add_c_func(struct fh_program *prog, const char *name, fh_c_func func) {
     struct named_c_func **cfn = (struct named_c_func **) map_get(&prog->c_funcs_map, name);
-    if (cfn && *cfn) {
+    if (cfn) {
         fprintf(stderr, "Error: duplicating C function '%s'!\n", name);
         return -1;
     }
@@ -264,7 +264,7 @@ const char *fh_get_c_func_name(struct fh_program *prog, fh_c_func func) {
 
 fh_c_func fh_get_c_func_by_name(struct fh_program *prog, const char *name) {
     struct named_c_func **func = (struct named_c_func **) map_get(&prog->c_funcs_map, name);
-    if (func && *func) {
+    if (func) {
         return (*func)->func;
     }
     return NULL;
@@ -273,11 +273,9 @@ fh_c_func fh_get_c_func_by_name(struct fh_program *prog, const char *name) {
 int fh_add_global_func(struct fh_program *prog, struct fh_closure *closure) {
     struct fh_closure **val = (struct fh_closure **) map_get(&prog->global_funcs_map,
                                                              GET_OBJ_STRING_DATA(closure->func_def->name));
-    if (val && *val) {
-        if (closure->func_def->name != NULL) {
-            *val = closure;
-            return 0;
-        }
+    if (val && closure->func_def->name != NULL) {
+        *val = closure;
+        return 0;
     }
     map_set(&prog->global_funcs_map, GET_OBJ_STRING_DATA(closure->func_def->name), closure);
     return 0;
