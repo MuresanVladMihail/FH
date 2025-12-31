@@ -29,7 +29,7 @@ void fh_free_ast(struct fh_ast *ast) {
     free(ast);
 }
 
-const char *fh_get_ast_symbol(struct fh_ast *ast, fh_symbol_id id) {
+const char *fh_get_ast_symbol(struct fh_ast *ast, const fh_symbol_id id) {
     return fh_get_symbol_name(&ast->symtab, id);
 }
 

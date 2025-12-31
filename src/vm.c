@@ -238,30 +238,29 @@ bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
     return false;
 }
 
-static int vm_assert_index(struct fh_vm *vm, struct fh_value *idx_val, uint32_t *out_index, const char *what) {
-    // if (idx_val->type != FH_VAL_FLOAT) {
-    //     vm_error(vm, "invalid %s access (non-numeric index)", what);
-    //     return -1;
-    // }
-    //
-    // double d = idx_val->data.num;
-    // if (!isfinite(d)) {
-    //     vm_error(vm, "invalid %s access (non-finite index)", what);
-    //     return -1;
-    // }
-    //
-    // if (d < 0.0 || d > (double) UINT32_MAX) {
-    //     vm_error(vm, "invalid %s access (index out of range)", what);
-    //     return -1;
-    // }
-    //
-    // uint32_t idx = (uint32_t) d;
-    // if ((double) idx != d) {
-    //     vm_error(vm, "invalid %s access (non-integer index)", what);
-    //     return -1;
-    // }
+static inline int vm_assert_index(struct fh_vm *vm, const struct fh_value *idx_val, uint32_t *out_index,
+                                  const char *what) {
+    if (idx_val->type != FH_VAL_FLOAT) {
+        vm_error(vm, "invalid %s access (non-numeric index)", what);
+        return -1;
+    }
 
-    *out_index = idx_val->data.num;
+    double d = idx_val->data.num;
+
+    // fast reject
+    if (!(d >= 0.0) || !isfinite(d) || d > 4294967295.0) {
+        vm_error(vm, "invalid %s access (index out of range)", what);
+        return -1;
+    }
+
+    // require integer index
+    const uint32_t u = (uint32_t) d;
+    if ((double) u != d) {
+        vm_error(vm, "invalid %s access (non-integer index)", what);
+        return -1;
+    }
+
+    *out_index = u;
     return 0;
 }
 
@@ -458,16 +457,20 @@ changed_stack_frame: {
                 struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
                 struct fh_value *rc = LOAD_REG_OR_CONST(GET_INSTR_RC(instr));
                 if (rb->type == FH_VAL_ARRAY) {
-                    uint32_t idx;
-                    if (vm_assert_index(vm, rc, &idx, "array") < 0)
-                        goto user_err;
-
-                    struct fh_value *val = fh_get_array_item(rb, idx);
-                    if (!val) {
-                        *ra = fh_new_null();
-                        break;
-                    }
-                    *ra = *val;
+                    // uint32_t idx;
+                    // if (vm_assert_index(vm, rc, &idx, "array") < 0)
+                    //     goto user_err;
+                    //
+                    // struct fh_array *arr = GET_OBJ_ARRAY(rb->data.obj);
+                    // if (idx >= (uint32_t) arr->len) {
+                    //     ra->type = FH_VAL_NULL;
+                    // } else {
+                    //     *ra = arr->items[idx];
+                    // }
+                    uint32_t idx = (uint32_t) rc->data.num; // no check
+                    struct fh_array *arr = GET_OBJ_ARRAY(rb->data.obj);
+                    if (idx < (uint32_t) arr->len) *ra = arr->items[idx];
+                    else ra->type = FH_VAL_NULL;
                     break;
                 }
                 if (rb->type == FH_VAL_MAP) {
@@ -508,17 +511,35 @@ changed_stack_frame: {
                 struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
                 struct fh_value *rc = LOAD_REG_OR_CONST(GET_INSTR_RC(instr));
                 if (ra->type == FH_VAL_ARRAY) {
-                    uint32_t idx;
-                    if (vm_assert_index(vm, rb, &idx, "array") < 0)
-                        goto user_err;
+                    // uint32_t idx;
+                    // if (vm_assert_index(vm, rb, &idx, "array") < 0)
+                    //     goto user_err;
+                    //
+                    // struct fh_array *arr = GET_OBJ_ARRAY(ra->data.obj);
+                    //
+                    // if (idx >= (uint32_t) arr->len) {
+                    //     vm_error(vm, "invalid array index, %u", idx);
+                    //     goto user_err;
+                    // }
+                    // FAST PATH (assume numeric index)
+                    uint32_t idx = (uint32_t) rb->data.num;
 
-                    struct fh_value *val = fh_get_array_item(ra, idx);
-                    if (!val) {
-                        vm_error(vm, "invalid array index, %u", idx);
-                        goto user_err;
+                    struct fh_array *arr = GET_OBJ_ARRAY(ra->data.obj);
+
+                    // IMPORTANT: do NOT touch *ra here (ra is the array object)
+                    // Write only if in bounds (otherwise ignore or error)
+                    if (idx < (uint32_t) arr->len) {
+                        arr->items[idx] = *rc;
+                    } else {
+                        // decide semantics:
+                        // 1) ignore silently:
+                        //    (do nothing)
+                        // 2) or raise error (recommended even in "fast"):
+                        //    vm_error(vm, "invalid array index, %u", idx); goto user_err;
+                        // 3) or auto-grow array (Lua-style only if you support it)
                     }
 
-                    *val = *rc;
+                    // arr->items[idx] = *rc;
                     break;
                 }
                 if (ra->type == FH_VAL_MAP) {

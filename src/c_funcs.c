@@ -1958,31 +1958,30 @@ static int fn_error(struct fh_program *prog, struct fh_value *ret, struct fh_val
 }
 
 static int fn_len(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (check_n_args(prog, "len()", 1, n_args))
-        return -1;
+    // if (check_n_args(prog, "len()", 1, n_args))
+    // return -1;
 
-    switch (args->type) {
+    switch (args[0].type) {
         case FH_VAL_ARRAY: {
-            const struct fh_array *arr = GET_VAL_ARRAY(&args[0]);
-            *ret = fh_make_number(arr->len);
+            struct fh_array *arr = GET_OBJ_ARRAY(args[0].data.obj);
+            *ret = fh_make_number((double)arr->len);
             return 0;
         }
         case FH_VAL_MAP: {
-            const struct fh_map *map = GET_VAL_MAP(&args[0]);
-            *ret = fh_make_number(map->len);
+            struct fh_map *map = GET_OBJ_MAP(args[0].data.obj);
+            *ret = fh_make_number((double)map->len);
             return 0;
         }
         case FH_VAL_STRING: {
-            const struct fh_string *string = GET_VAL_STRING(&args[0]);
-            *ret = fh_make_number(string->size - 1);
+            struct fh_string *s = GET_OBJ_STRING(args[0].data.obj);
+            // presupunând că size include terminator
+            *ret = fh_make_number((double)(s->size ? (s->size - 1) : 0));
             return 0;
         }
         default:
-            break;
+            return fh_set_error(prog, "len(): argument 1 must be an array, map or string, got %s",
+                                fh_type_to_str(prog, args[0].type));
     }
-
-    return fh_set_error(prog, "len(): argument 1 must be an array, map or string, got %s",
-                        fh_type_to_str(prog, args[0].type));
 }
 
 static int fn_delete(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {

@@ -966,6 +966,7 @@ static int compile_un_op(struct fh_compiler *c, struct fh_src_loc loc, struct fh
 
 static int compile_func_call(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_expr_func_call *expr) {
     int n_args = fh_expr_list_size(expr->arg_list);
+    printf("Doar de test: %s\n", fh_get_ast_symbol(c->ast, expr->func->data.var));
     int func_reg = alloc_n_regs(c, loc, n_args + 1);
     if (func_reg < 0 || compile_expr_to_reg(c, expr->func, func_reg) < 0)
         return -1;
