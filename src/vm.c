@@ -526,17 +526,9 @@ changed_stack_frame: {
 
                     struct fh_array *arr = GET_OBJ_ARRAY(ra->data.obj);
 
-                    // IMPORTANT: do NOT touch *ra here (ra is the array object)
                     // Write only if in bounds (otherwise ignore or error)
                     if (idx < (uint32_t) arr->len) {
                         arr->items[idx] = *rc;
-                    } else {
-                        // decide semantics:
-                        // 1) ignore silently:
-                        //    (do nothing)
-                        // 2) or raise error (recommended even in "fast"):
-                        //    vm_error(vm, "invalid array index, %u", idx); goto user_err;
-                        // 3) or auto-grow array (Lua-style only if you support it)
                     }
 
                     // arr->items[idx] = *rc;
@@ -770,7 +762,9 @@ changed_stack_frame: {
 
                         *ra = fh_new_string(vm->prog, concate);
                         free(concate);
-                    } else if (rb->type == FH_VAL_FLOAT) {
+                        break;
+                    }
+                    if (rb->type == FH_VAL_FLOAT) {
                         int needed = snprintf(NULL, 0, "%g%s", rb->data.num, s1) + 1;
                         if (needed < 0) {
                             vm_error(vm, "string formatting error");
@@ -785,13 +779,8 @@ changed_stack_frame: {
 
                         *ra = fh_new_string(vm->prog, concate);
                         free(concate);
-                    } else {
-                        vm_error(vm, "can't add the two variables, type %s and type %s",
-                                 fh_type_to_str(vm->prog, rb->type),
-                                 fh_type_to_str(vm->prog, rc->type));
-                        goto user_err;
+                        break;
                     }
-                } else {
                     vm_error(vm, "can't add the two variables, type %s and type %s",
                              fh_type_to_str(vm->prog, rb->type),
                              fh_type_to_str(vm->prog, rc->type));

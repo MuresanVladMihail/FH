@@ -3,14 +3,16 @@ fn i32(x) { return 2; }
 
 fn make_tilemap(w, h, seed_ref) {
     let tiles = [];
-    let i = 0;
-    while (i < w*h) {
+    for (let i = 0; i < w*h; i++) {
         let t = 0;
         if (rand01(seed_ref) < 0.18) t = 1;
         append(tiles, t);
-        i = i + 1;
     }
-    let m = {};
+    let m = {
+        #"w":w,
+        #"h":h,
+        #"tiles": tiles
+    };
     m["w"]=w; m["h"]=h; m["tiles"]=tiles;
     return m;
 }
