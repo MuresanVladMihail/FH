@@ -1,5 +1,6 @@
 #include "vec.h"
 #include <limits.h>
+#include <stdint.h>
 
 /* ---- helpers ---- */
 

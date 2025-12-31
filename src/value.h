@@ -182,6 +182,8 @@ struct fh_value *fh_grow_array_object(struct fh_program *prog, struct fh_array *
 
 struct fh_value *fh_grow_array_object_uninit(struct fh_program *prog, struct fh_array *arr, uint32_t num_items);
 
+bool fh_reserve_array_capacity(struct fh_program *prog, struct fh_array *arr, uint32_t min_cap);
+
 void fh_reset_array(struct fh_array *arr);
 
 const char *fh_get_func_def_name(struct fh_func_def *func_def);

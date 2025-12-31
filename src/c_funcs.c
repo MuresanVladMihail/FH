@@ -434,8 +434,8 @@ static int fn_math_frexp(struct fh_program *prog, struct fh_value *ret, struct f
 
     int pin_state = fh_get_pin_state(prog);
     struct fh_array *arr = fh_make_array(prog, true);
-    struct fh_value fp = fh_new_number(fract_part);
-    struct fh_value ip = fh_make_number(e);
+    const struct fh_value fp = fh_new_number(fract_part);
+    const struct fh_value ip = fh_make_number(e);
 
     struct fh_value *new_items = fh_grow_array_object(prog, arr, 2);
     if (!new_items)
@@ -1191,61 +1191,79 @@ static int fn_io_filetype(struct fh_program *prog, struct fh_value *ret, struct 
 /*********** End I/O functions ***********/
 
 /*********** String functions ***********/
-static int fn_string_slice(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (!fh_is_string(&args[0]) || !fh_is_number(&args[1]))
-        return fh_set_error(prog, "expected string and number delimiters");
+static struct fh_value fh_new_string_slice_local(struct fh_program *prog,
+                                                 const char *src,
+                                                 size_t off,
+                                                 size_t n) {
+    char *buf = (char *) malloc(n + 1);
+    if (!buf) {
+        // întoarcem null; caller-ul decide ce face
+        return fh_new_null();
+    }
+    if (n)
+        memcpy(buf, src + off, n);
+    buf[n] = '\0';
 
-    const char *string = fh_get_string(&args[0]);
-    int start = (int) fh_get_number(&args[1]);
-    int end = (int) fh_optnumber(args, n_args, 2, 0);
+    struct fh_value v = fh_new_string(prog, buf);
+    free(buf);
+    return v;
+}
 
-    size_t str_len = strlen(string);
+static int fn_string_slice(struct fh_program *prog, struct fh_value *ret,
+                           struct fh_value *args, int n_args) {
+    if (n_args != 2 && n_args != 3)
+        return fh_set_error(prog, "slice() expects 2 or 3 arguments");
 
-    if (start < 0 || start >= str_len)
-        return fh_set_error(prog, "Start index out of bounds!");
+    if (!fh_is_string(&args[0]) || !fh_is_number(&args[1]) ||
+        (n_args == 3 && !fh_is_number(&args[2])))
+        return fh_set_error(prog, "slice() expects (string, number[, number])");
 
-    if (end != 0 && (end < start || end >= str_len))
-        return fh_set_error(prog, "Invalid end index value");
+    const char *s = fh_get_string(&args[0]);
+    const size_t len = strlen(s);
 
-    char *new_string = malloc(str_len + 1);
-    memset(new_string, 0, str_len + 1);
+    const int start_i = (int) fh_get_number(&args[1]);
+    if (start_i < 0) return fh_set_error(prog, "Start index out of bounds!");
+    const size_t start = (size_t) start_i;
+    if (start > len) return fh_set_error(prog, "Start index out of bounds!");
 
-    struct fh_value arr = fh_new_array(prog);
-    fh_grow_array(prog, &arr, 3);
-
-    struct fh_array *arr_val = GET_VAL_ARRAY(&arr);
-
-    if (n_args == 2) {
-        for (int i = 0; i < start; i++) {
-            new_string[i] = string[i];
-        }
-        arr_val->items[0] = fh_new_string(prog, new_string);
-        memset(new_string, 0, str_len + 1);
-        for (int i = start; i < str_len; i++) {
-            new_string[i - start] = string[i];
-        }
-        arr_val->items[1] = fh_new_string(prog, new_string);
-    } else if (n_args == 3) {
-        for (int i = 0; i < start; i++) {
-            new_string[i] = string[i];
-        }
-        arr_val->items[0] = fh_new_string(prog, new_string);
-        memset(new_string, 0, str_len + 1);
-        for (int i = start; i < end; i++) {
-            new_string[i - start] = string[i];
-        }
-        arr_val->items[1] = fh_new_string(prog, new_string);
-        memset(new_string, 0, str_len + 1);
-        if (end < str_len) {
-            for (int i = end; i < str_len; i++) {
-                new_string[i - end] = string[i];
-            }
-            arr_val->items[2] = fh_new_string(prog, new_string);
-        }
+    size_t end = len;
+    if (n_args == 3) {
+        const int end_i = (int) fh_get_number(&args[2]);
+        if (end_i < 0) return fh_set_error(prog, "Invalid end index value");
+        end = (size_t) end_i;
+        if (end < start || end > len)
+            return fh_set_error(prog, "Invalid end index value");
     }
 
-    *ret = arr;
-    free(new_string);
+    struct fh_value out = fh_new_array(prog);
+    if (out.type != FH_VAL_ARRAY)
+        return fh_set_error(prog, "out of memory");
+
+    const uint32_t out_len = (n_args == 2) ? 2u : 3u;
+    if (!fh_grow_array(prog, &out, out_len))
+        return fh_set_error(prog, "out of memory");
+
+    struct fh_array *a = GET_VAL_ARRAY(&out);
+
+    // prefix: [0..start)
+    a->items[0] = fh_new_string_slice_local(prog, s, 0, start);
+    if (a->items[0].type == FH_VAL_NULL) return fh_set_error(prog, "out of memory");
+
+    if (n_args == 2) {
+        // suffix: [start..len)
+        a->items[1] = fh_new_string_slice_local(prog, s, start, len - start);
+        if (a->items[1].type == FH_VAL_NULL) return fh_set_error(prog, "out of memory");
+    } else {
+        // middle: [start..end)
+        a->items[1] = fh_new_string_slice_local(prog, s, start, end - start);
+        if (a->items[1].type == FH_VAL_NULL) return fh_set_error(prog, "out of memory");
+
+        // suffix: [end..len)
+        a->items[2] = fh_new_string_slice_local(prog, s, end, len - end);
+        if (a->items[2].type == FH_VAL_NULL) return fh_set_error(prog, "out of memory");
+    }
+
+    *ret = out;
     return 0;
 }
 
@@ -1403,7 +1421,7 @@ static int fn_string_reverse(struct fh_program *prog, struct fh_value *ret, stru
     if (!fh_is_string(&args[0]))
         return fh_set_error(prog, "expected string values, got: %s", fh_type_to_str(prog, args[0].type));
 
-    char *str = GET_VAL_STRING_DATA(&args[0]);
+    const char *str = GET_VAL_STRING_DATA(&args[0]);
 
     /* We have to alloc a new space in memory because otherwise there's no way to avoid this:
      * let a = "hi";
@@ -1421,7 +1439,7 @@ static int fn_string_reverse(struct fh_program *prog, struct fh_value *ret, stru
 }
 
 static char *substr(char const *input, size_t start, size_t len) {
-    char *ret = malloc(len + 1);
+    char *ret = malloc(len);
     memcpy(ret, input+start, len);
     ret[len] = '\0';
     return ret;
@@ -1436,31 +1454,16 @@ static int fn_string_substr(struct fh_program *prog, struct fh_value *ret, struc
                             fh_type_to_str(prog, args[1].type), fh_type_to_str(prog, args[2].type));
 
     const char *str = GET_VAL_STRING_DATA(&args[0]);
-    int start = (int) fh_get_number(&args[1]);
-    int len = (int) fh_get_number(&args[2]);
+    const int start = (int) fh_get_number(&args[1]);
+    const int len = (int) fh_get_number(&args[2]);
     if (len < 0 || start < 0)
         return fh_set_error(prog, "cannot have a negative start or length");
-    if (start >= (int) strlen(str))
+    if (start > (int) strlen(str))
         return fh_set_error(prog, "start index out of bounds");
     char *ret_str = substr(str, start, len);
     *ret = fh_new_string(prog, ret_str);
     free(ret_str);
     return 0;
-}
-
-static char *str_append(char *to, const char *val) {
-    size_t to_len = 0;
-    if (to)
-        to_len = strlen(to);
-    size_t val_len = strlen(val);
-    size_t total_len = to_len + val_len;
-
-    to = realloc(to, total_len + 1);
-
-    strcpy(to + to_len, val);
-    to[total_len] = '\0';
-
-    return to;
 }
 
 static int fn_string_join(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
@@ -1957,32 +1960,32 @@ static int fn_error(struct fh_program *prog, struct fh_value *ret, struct fh_val
     return fh_set_error(prog, "%s", str);
 }
 
-static int fn_len(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    // if (check_n_args(prog, "len()", 1, n_args))
-    // return -1;
-
-    switch (args[0].type) {
-        case FH_VAL_ARRAY: {
-            struct fh_array *arr = GET_OBJ_ARRAY(args[0].data.obj);
-            *ret = fh_make_number((double)arr->len);
-            return 0;
-        }
-        case FH_VAL_MAP: {
-            struct fh_map *map = GET_OBJ_MAP(args[0].data.obj);
-            *ret = fh_make_number((double)map->len);
-            return 0;
-        }
-        case FH_VAL_STRING: {
-            struct fh_string *s = GET_OBJ_STRING(args[0].data.obj);
-            // presupunând că size include terminator
-            *ret = fh_make_number((double)(s->size ? (s->size - 1) : 0));
-            return 0;
-        }
-        default:
-            return fh_set_error(prog, "len(): argument 1 must be an array, map or string, got %s",
-                                fh_type_to_str(prog, args[0].type));
-    }
-}
+// static int fn_len(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+//     // if (check_n_args(prog, "len()", 1, n_args))
+//     // return -1;
+//
+//     switch (args[0].type) {
+//         case FH_VAL_ARRAY: {
+//             struct fh_array *arr = GET_OBJ_ARRAY(args[0].data.obj);
+//             *ret = fh_make_number((double)arr->len);
+//             return 0;
+//         }
+//         case FH_VAL_MAP: {
+//             struct fh_map *map = GET_OBJ_MAP(args[0].data.obj);
+//             *ret = fh_make_number((double)map->len);
+//             return 0;
+//         }
+//         case FH_VAL_STRING: {
+//             struct fh_string *s = GET_OBJ_STRING(args[0].data.obj);
+//             // presupunând că size include terminator
+//             *ret = fh_make_number((double)(s->size ? (s->size - 1) : 0));
+//             return 0;
+//         }
+//         default:
+//             return fh_set_error(prog, "len(): argument 1 must be an array, map or string, got %s",
+//                                 fh_type_to_str(prog, args[0].type));
+//     }
+// }
 
 static int fn_delete(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
     if (check_n_args(prog, "delete()", 2, n_args))
@@ -2085,20 +2088,6 @@ static int fn_contains_key(struct fh_program *prog, struct fh_value *ret, struct
     //printf("key "); print_value(&args[1]); printf(" has value "); print_value(ret); printf("\n");
     *ret = fh_make_bool(true);
 
-    return 0;
-}
-
-static int fn_append(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (check_n_args(prog, "append()", -2, n_args))
-        return -1;
-    struct fh_array *arr = GET_VAL_ARRAY(&args[0]);
-    if (!arr)
-        return fh_set_error(prog, "append(): argument 1 must be an array");
-    struct fh_value *new_items = fh_grow_array_object(prog, arr, n_args - 1);
-    if (!new_items)
-        return fh_set_error(prog, "out of memory");
-    memcpy(new_items, args + 1, sizeof(struct fh_value) * (n_args-1));
-    *ret = args[0];
     return 0;
 }
 
@@ -2373,12 +2362,10 @@ const struct fh_named_c_func fh_std_c_funcs[] = {
     DEF_FN(print),
     DEF_FN(println),
     DEF_FN(printf),
-    DEF_FN(len),
     DEF_FN(extends),
     DEF_FN(reset),
     DEF_FN(next_key),
     DEF_FN(contains_key),
-    DEF_FN(append),
     DEF_FN(insert),
     DEF_FN(grow),
     DEF_FN(delete),

@@ -107,12 +107,30 @@ void fh_reset_array(struct fh_array *arr) {
     arr->len = 0;
 }
 
+bool fh_reserve_array_capacity(struct fh_program *prog, struct fh_array *arr, uint32_t min_cap) {
+    if (min_cap <= arr->cap)
+        return true;
+
+    size_t new_cap = arr->cap ? arr->cap : 8;
+    while (new_cap < min_cap)
+        new_cap *= 2;
+
+    void *new_items = realloc(arr->items, new_cap * sizeof(struct fh_value));
+    if (!new_items) {
+        fh_set_error(prog, "out of memory");
+        return false;
+    }
+
+    arr->items = new_items;
+    arr->cap = (uint32_t) new_cap;
+    return true;
+}
+
 struct fh_value *fh_grow_array_object_uninit(struct fh_program *prog, struct fh_array *arr, const uint32_t num_items) {
     // if (arr->header.type != FH_VAL_ARRAY) return NULL;
 
     const size_t need = (size_t) arr->len + num_items;
-    if (need < (size_t) arr->len ||
-        need > UINT32_MAX) {
+    if (need > UINT32_MAX) {
         fh_set_error(prog, "out of memory");
         return NULL;
     }

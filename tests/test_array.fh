@@ -13,7 +13,8 @@ fn print_array(arr)
 fn main(args)
 { 
     let x = [1,[2],3,];
-    append(x, "four", "五");
+    append(x, "four");
+    append(x, "五");
 
     assert(x[0]);
     assert(x[1]);

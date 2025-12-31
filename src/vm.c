@@ -557,6 +557,14 @@ changed_stack_frame: {
                 struct fh_array *arr = fh_make_array(vm->prog, false);
                 if (!arr)
                     goto err;
+
+                // GC_PIN_OBJ(arr);
+                // if (!fh_reserve_array_capacity(vm->prog, arr, 8 + n_elems ? n_elems : 0)) {
+                //     GC_UNPIN_OBJ(arr);
+                //     goto err;
+                // }
+                // GC_UNPIN_OBJ(arr);
+
                 if (n_elems != 0) {
                     GC_PIN_OBJ(arr);
                     // struct fh_value *first = fh_grow_array_object(vm->prog, arr, n_elems);
@@ -567,6 +575,8 @@ changed_stack_frame: {
                     }
                     GC_UNPIN_OBJ(arr);
                     memcpy(first, ra + 1, n_elems*sizeof(struct fh_value));
+                } else {
+                    fh_reserve_array_capacity(vm->prog, arr, 128);
                 }
                 ra->type = FH_VAL_ARRAY;
                 ra->data.obj = arr;
@@ -580,7 +590,7 @@ changed_stack_frame: {
                 struct fh_map *map = fh_make_map(vm->prog, false);
                 if (!map)
                     goto err;
-                if (fh_alloc_map_object_len(map, n_elems_half) < 0) {
+                if (fh_alloc_map_object_len(map, n_elems) < 0) {
                     goto err;
                 }
                 if (n_elems != 0) {
@@ -699,7 +709,6 @@ changed_stack_frame: {
                 ra->data.num = rb->data.num - 1.0;
                 break;
             }
-
             handle_op(OPC_ADD) {
                 struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
                 struct fh_value *rc = LOAD_REG_OR_CONST(GET_INSTR_RC(instr));
@@ -931,6 +940,49 @@ changed_stack_frame: {
                 do_test_arithmetic(<=, &cmp_test, instr);
                 if (cmp_test)
                     pc++;
+                break;
+            }
+
+            handle_op(OPC_LEN) {
+                struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
+                if (rb->type == FH_VAL_ARRAY) {
+                    ra->type = FH_VAL_FLOAT;
+                    ra->data.num = GET_OBJ_ARRAY(rb->data.obj)->len;
+                    break;
+                }
+                if (rb->type == FH_VAL_MAP) {
+                    ra->type = FH_VAL_FLOAT;
+                    ra->data.num = GET_OBJ_MAP(rb->data.obj)->len;
+                    break;
+                }
+                if (rb->type == FH_VAL_STRING) {
+                    ra->type = FH_VAL_FLOAT;
+                    ra->data.num = GET_VAL_STRING(rb)->size - 1;
+                    break;
+                }
+                vm_error(vm, "len(): argument must be array/map/string");
+                goto user_err;
+            }
+
+            handle_op(OPC_APPEND) {
+                //append rA, rB(value), rC(array)
+                struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr)); // value
+                struct fh_value *rc = LOAD_REG_OR_CONST(GET_INSTR_RC(instr)); // array
+
+                if (rc->type != FH_VAL_ARRAY) {
+                    vm_error(vm, "append(): argument 1 must be array");
+                    goto user_err;
+                }
+
+                struct fh_array *arr = GET_OBJ_ARRAY(rc->data.obj);
+
+                GC_PIN_OBJ(arr);
+                struct fh_value *slot = fh_grow_array_object_uninit(vm->prog, arr, 1);
+                GC_UNPIN_OBJ(arr);
+                if (!slot) goto err;
+
+                *slot = *rb;
+                *ra = *rc;
                 break;
             }
 

@@ -608,7 +608,7 @@ static int get_num_open_upvals(struct fh_compiler *c, struct fh_src_loc loc, int
 
 static int compile_var(struct fh_compiler *c, struct fh_src_loc loc, fh_symbol_id var) {
     // local variable
-    int reg = get_var_reg(c, loc, var);
+    const int reg = get_var_reg(c, loc, var);
     if (reg >= 0)
         return reg;
 
@@ -626,7 +626,7 @@ static int compile_var(struct fh_compiler *c, struct fh_src_loc loc, fh_symbol_i
     }
 
     // global function
-    int k = add_const_global_func(c, loc, var);
+    const int k = add_const_global_func(c, loc, var);
     if (k >= 0)
         return k + MAX_FUNC_REGS + 1;
 
@@ -655,7 +655,7 @@ static int compile_postfix_incdec_to_reg(struct fh_compiler *c, struct fh_p_expr
     if (arg->type != EXPR_VAR && arg->type != EXPR_INDEX)
         return fh_compiler_error(c, loc, "postfix ++/-- expects a variable or index");
 
-    int tmp = alloc_reg(c, loc, TMP_VARIABLE);
+    const int tmp = alloc_reg(c, loc, TMP_VARIABLE);
     if (tmp < 0) return -1;
 
     // tmp = old
@@ -699,7 +699,7 @@ static int compile_load_lvalue_to_reg(struct fh_compiler *c, struct fh_p_expr *l
         if (container_rk < 0) return -1;
 
         if (RK_IS_CONST(container_rk)) {
-            int tmp = alloc_reg(c, loc, TMP_VARIABLE);
+            const int tmp = alloc_reg(c, loc, TMP_VARIABLE);
             if (tmp < 0) return -1;
             if (add_instr(c, loc, MAKE_INSTR_AB(OPC_MOV, tmp, container_rk)) < 0) return -1;
             container_rk = tmp;
@@ -739,7 +739,7 @@ static int compile_store_reg_to_lvalue(struct fh_compiler *c, struct fh_p_expr *
         if (container_rk < 0) return -1;
 
         if (RK_IS_CONST(container_rk)) {
-            int tmp = alloc_reg(c, loc, TMP_VARIABLE);
+            const int tmp = alloc_reg(c, loc, TMP_VARIABLE);
             if (tmp < 0) return -1;
             if (add_instr(c, loc, MAKE_INSTR_AB(OPC_MOV, tmp, container_rk)) < 0) return -1;
             container_rk = tmp;
@@ -964,9 +964,56 @@ static int compile_un_op(struct fh_compiler *c, struct fh_src_loc loc, struct fh
     return compile_un_op_to_reg(c, loc, expr, dest_reg);
 }
 
+static const char *try_get_called_name(struct fh_compiler *c, struct fh_p_expr *callee) {
+    if (!callee || callee->type != EXPR_VAR) return NULL;
+    return fh_get_ast_symbol(c->ast, callee->data.var);
+}
+
 static int compile_func_call(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_expr_func_call *expr) {
     int n_args = fh_expr_list_size(expr->arg_list);
-    printf("Doar de test: %s\n", fh_get_ast_symbol(c->ast, expr->func->data.var));
+
+    const char *name = try_get_called_name(c, expr->func);
+    if (name && strcmp(name, "len") == 0) {
+        if (n_args != 1)
+            return fh_compiler_error(c, loc, "len() expects 1 argument");
+
+        const int dest = alloc_reg(c, loc, TMP_VARIABLE);
+        if (dest < 0) return -1;
+
+        const int arg_rk = compile_expr(c, expr->arg_list);
+        if (arg_rk < 0) return -1;
+
+        if (add_instr(c, loc, MAKE_INSTR_AB(OPC_LEN, dest, arg_rk)) < 0)
+            return -1;
+
+        return dest;
+    }
+    if (name && strcmp(name, "append") == 0) {
+        if (n_args != 2)
+            return fh_compiler_error(c, loc, "append() expects 2 arguments");
+
+        // compile args
+        struct fh_p_expr *a0 = expr->arg_list;
+        struct fh_p_expr *a1 = expr->arg_list->next;
+
+        int arr_rk = compile_expr(c, a0);
+        if (arr_rk < 0) return -1;
+
+        if (RK_IS_CONST(arr_rk)) {
+            const int tmp = alloc_reg(c, loc, TMP_VARIABLE);
+            if (tmp < 0) return -1;
+            if (add_instr(c, loc, MAKE_INSTR_AB(OPC_MOV, tmp, arr_rk)) < 0) return -1;
+            arr_rk = tmp;
+        }
+
+        const int val_rk = compile_expr(c, a1);
+        if (val_rk < 0) return -1;
+
+        if (add_instr(c, loc, MAKE_INSTR_ABC(OPC_APPEND, arr_rk, val_rk, arr_rk)) < 0)
+            return -1;
+
+        return arr_rk;
+    }
     int func_reg = alloc_n_regs(c, loc, n_args + 1);
     if (func_reg < 0 || compile_expr_to_reg(c, expr->func, func_reg) < 0)
         return -1;
@@ -1009,7 +1056,7 @@ static int compile_index(struct fh_compiler *c, struct fh_src_loc loc, struct fh
 }
 
 static int compile_array_lit(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_expr_array_lit *expr) {
-    int n_elems = fh_expr_list_size(expr->elem_list);
+    const int n_elems = fh_expr_list_size(expr->elem_list);
     int array_reg = alloc_n_regs(c, loc, n_elems + 1);
     if (array_reg < 0)
         return -1;
@@ -1029,7 +1076,7 @@ static int compile_array_lit(struct fh_compiler *c, struct fh_src_loc loc, struc
 }
 
 static int compile_map_lit(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_expr_map_lit *expr) {
-    int n_elems = fh_expr_list_size(expr->elem_list);
+    const int n_elems = fh_expr_list_size(expr->elem_list);
     int map_reg = alloc_n_regs(c, loc, n_elems + 1);
     if (map_reg < 0)
         return -1;
@@ -1155,7 +1202,7 @@ static int compile_expr(struct fh_compiler *c, struct fh_p_expr *expr) {
         case EXPR_FUNC: return compile_inner_func(c, expr->loc, &expr->data.func);
         case EXPR_POST_INC:
         case EXPR_POST_DEC: {
-            int dest_reg = alloc_reg(c, expr->loc, TMP_VARIABLE);
+            const int dest_reg = alloc_reg(c, expr->loc, TMP_VARIABLE);
             if (dest_reg < 0) return -1;
             return compile_postfix_incdec_to_reg(c, &expr->data.postfix, dest_reg);
         }
@@ -1245,7 +1292,7 @@ static int compile_expr_to_reg(struct fh_compiler *c, struct fh_p_expr *expr, in
 }
 
 static int compile_var_decl(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_stmt_decl *decl) {
-    int reg = alloc_reg(c, loc, TMP_VARIABLE);
+    const int reg = alloc_reg(c, loc, TMP_VARIABLE);
     if (reg < 0)
         return -1;
     if (decl->val) {
@@ -1263,7 +1310,7 @@ static int compile_var_decl(struct fh_compiler *c, struct fh_src_loc loc, struct
 }
 
 static int compile_const_decl(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_stmt_decl *decl) {
-    int reg = alloc_reg(c, loc, TMP_VARIABLE);
+    const int reg = alloc_reg(c, loc, TMP_VARIABLE);
     if (reg < 0)
         return -1;
     if (decl->val) {

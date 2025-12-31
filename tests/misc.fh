@@ -1,3 +1,6 @@
 fn main() {
-    ge();
+    # let a = [];
+    println([1]);
+    # append(a, 3);
+    # let c = {"a":fn(){return 3;}};
 }

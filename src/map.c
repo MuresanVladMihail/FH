@@ -65,33 +65,43 @@ static uint32_t find_slot(struct fh_map_entry *entries, uint32_t cap, struct fh_
     return i;
 }
 
-static uint32_t insert(struct fh_map_entry *entries, uint32_t cap,
-                       struct fh_value *key, struct fh_value *val) {
-    const uint32_t i = find_slot(entries, cap, key);
-    // printf("-> inserting k="); fh_dump_value(key);
-    // printf("; val="); fh_dump_value(val);
-    // printf(" at position %u (occupied=%d)\n", i, OCCUPIED(&entries[i]));
-    if (!OCCUPIED(&entries[i])) {
-        entries[i].key = *key;
-        entries[i].val = *val;
+static inline uint32_t find_empty_slot(struct fh_map_entry *entries, uint32_t cap, uint32_t i) {
+    while (OCCUPIED(&entries[i])) {
+        i = (i + 1) & (cap - 1);
     }
     return i;
 }
 
-static int rebuild(struct fh_map *map, uint32_t cap) {
-    size_t cap_size = cap * sizeof(struct fh_map_entry);
-    struct fh_map_entry *entries = malloc(cap_size);
-    if (!entries)
-        return -1;
-    memset(entries, 0, cap_size);
+static inline uint32_t hash_to_index_pow2(const struct fh_value *key, uint32_t cap) {
+    uint32_t h;
+    switch (key->type) {
+        case FH_VAL_STRING: h = GET_VAL_STRING(key)->hash;
+            break;
+        case FH_VAL_BOOL: h = fh_hash(&key->data.b, sizeof(bool));
+            break;
+        case FH_VAL_FLOAT: h = fh_hash(&key->data.num, sizeof(double));
+            break;
+        case FH_VAL_C_FUNC: h = fh_hash(&key->data.c_func, sizeof(fh_c_func));
+            break;
+        default: h = fh_hash(&key->data.obj, sizeof(void *));
+            break;
+    }
+    return h & (cap - 1); // cap power-of-two
+}
 
-    //printf("rebuilding map with cap %u\n", cap);
+static int rebuild(struct fh_map *map, uint32_t cap) {
+    struct fh_map_entry *entries = calloc((size_t) cap, sizeof(*entries));
+    if (!entries) return -1;
+
     for (uint32_t i = 0; i < map->cap; i++) {
         struct fh_map_entry *e = &map->entries[i];
-        if (e->key.type != FH_VAL_NULL)
-            insert(entries, cap, &e->key, &e->val);
+        if (!OCCUPIED(e)) continue;
+
+        uint32_t idx = hash_to_index_pow2(&e->key, cap);
+        idx = find_empty_slot(entries, cap, idx);
+
+        entries[idx] = *e; // copiem direct (key+val)
     }
-    //printf("done rebuilding\n");
 
     free(map->entries);
     map->entries = entries;
@@ -160,7 +170,7 @@ int fh_add_map_object_entry(struct fh_program *prog, struct fh_map *map,
         }
     }
 
-    if (map->cap == 0 || map->len + 1 > map->cap >> 1) {
+    if (map->cap == 0 || (map->len + 1) * 4 > map->cap * 3) {
         if (rebuild(map, (map->cap == 0) ? 16 : map->cap << 1) < 0) {
             fh_set_error(prog, "out of memory");
             return -1;
