@@ -52,13 +52,6 @@ static int ensure_stack_size(struct fh_vm *vm, size_t size) {
     return 0;
 }
 
-static inline void fh_null_regs(struct fh_value *p, int count) {
-    for (int i = 0; i < count; i++) {
-        p[i].type = FH_VAL_NULL;
-        p[i].data.obj = NULL;
-    }
-}
-
 static struct fh_vm_call_frame *prepare_call(struct fh_vm *vm, struct fh_closure *closure, const int ret_reg,
                                              const int n_args) {
     const struct fh_func_def *func_def = closure->func_def;
@@ -71,7 +64,12 @@ static struct fh_vm_call_frame *prepare_call(struct fh_vm *vm, struct fh_closure
     // Args are already copied into [base .. base+n_args)
     // Only mark remaining regs as NULL (cheaper than memset full structs)
     if (n_args < func_def->n_regs) {
-        fh_null_regs(vm->stack + base + n_args, func_def->n_regs - n_args);
+        struct fh_value *p = vm->stack + base + n_args;
+        const int count = func_def->n_regs - n_args;
+        for (int i = 0; i < count; i++) {
+            p[i].type = FH_VAL_NULL;
+            p[i].data.obj = NULL;
+        }
     }
 
     struct fh_vm_call_frame *frame = call_frame_stack_push(&vm->call_stack, NULL);
@@ -164,12 +162,6 @@ bool fh_val_is_true(struct fh_value *val) {
     if (val->type == FH_VAL_UPVAL)
         val = GET_OBJ_UPVAL(val)->val;
     switch (val->type) {
-        case FH_VAL_BOOL: return val->data.b;
-        case FH_VAL_FLOAT: return val->data.num != 0.0;
-        case FH_VAL_STRING: return GET_VAL_STRING_DATA(val)[0] != '\0';
-        case FH_VAL_NULL:
-        case FH_VAL_UPVAL:
-            return false;
         case FH_VAL_ARRAY:
         case FH_VAL_MAP:
         case FH_VAL_CLOSURE:
@@ -177,6 +169,12 @@ bool fh_val_is_true(struct fh_value *val) {
         case FH_VAL_C_FUNC:
         case FH_VAL_C_OBJ:
             return true;
+        case FH_VAL_NULL:
+        case FH_VAL_UPVAL:
+            return false;
+        case FH_VAL_BOOL: return val->data.b;
+        case FH_VAL_FLOAT: return val->data.num != 0.0;
+        case FH_VAL_STRING: return GET_VAL_STRING_DATA(val)[0] != '\0';
     }
     return false;
 }
