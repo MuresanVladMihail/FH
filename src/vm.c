@@ -36,41 +36,22 @@ static int vm_error(struct fh_vm *vm, char *fmt, ...) {
     return -1;
 }
 
+static int vm_error_oom(struct fh_vm *vm) {
+    return vm_error(vm, "out of memory");
+}
+
 static int ensure_stack_size(struct fh_vm *vm, size_t size) {
     if (vm->stack_size >= size)
         return 0;
-    size_t new_size = (size + 1024 + 1) / 1024 * 1024;
+    const size_t new_size = (size + 1024 + 1) / 1024 * 1024;
     void *new_stack = realloc(vm->stack, new_size * sizeof(struct fh_value));
     if (!new_stack)
-        return vm_error(vm, "out of memory");
+        return vm_error_oom(vm);
     vm->stack = new_stack;
     vm->stack_size = new_size;
     return 0;
 }
 
-// static struct fh_vm_call_frame *prepare_call(struct fh_vm *vm, struct fh_closure *closure, int ret_reg, int n_args) {
-//     const struct fh_func_def *func_def = closure->func_def;
-//
-//     if (ensure_stack_size(vm, ret_reg + 1 + func_def->n_regs) < 0)
-//         return NULL;
-//     if (n_args < func_def->n_params)
-//         memset(vm->stack + ret_reg + 1 + n_args, 0, (func_def->n_params - n_args) * sizeof(struct fh_value));
-//
-//     memset(vm->stack + ret_reg + 1 + func_def->n_params, 0,
-//            (func_def->n_regs - func_def->n_params) * sizeof(struct fh_value));
-//
-//     struct fh_vm_call_frame *frame = call_frame_stack_push(&vm->call_stack, NULL);
-//     if (!frame) {
-//         vm_error(vm, "out of memory");
-//         return NULL;
-//     }
-//     frame->closure = closure;
-//     frame->base = ret_reg + 1;
-//     frame->ret_addr = NULL;
-//     frame->stack_top = frame->base + closure->func_def->n_regs;
-//
-//     return frame;
-// }
 static inline void fh_null_regs(struct fh_value *p, int count) {
     for (int i = 0; i < count; i++) {
         p[i].type = FH_VAL_NULL;
@@ -78,7 +59,8 @@ static inline void fh_null_regs(struct fh_value *p, int count) {
     }
 }
 
-static struct fh_vm_call_frame *prepare_call(struct fh_vm *vm, struct fh_closure *closure, int ret_reg, int n_args) {
+static struct fh_vm_call_frame *prepare_call(struct fh_vm *vm, struct fh_closure *closure, const int ret_reg,
+                                             const int n_args) {
     const struct fh_func_def *func_def = closure->func_def;
 
     if (ensure_stack_size(vm, (size_t) ret_reg + 1u + (size_t) func_def->n_regs) < 0)
@@ -94,7 +76,7 @@ static struct fh_vm_call_frame *prepare_call(struct fh_vm *vm, struct fh_closure
 
     struct fh_vm_call_frame *frame = call_frame_stack_push(&vm->call_stack, NULL);
     if (!frame) {
-        vm_error(vm, "out of memory");
+        vm_error_oom(vm);
         return NULL;
     }
 
@@ -111,7 +93,7 @@ static struct fh_vm_call_frame *prepare_c_call(struct fh_vm *vm, int ret_reg, in
 
     struct fh_vm_call_frame *frame = call_frame_stack_push(&vm->call_stack, NULL);
     if (!frame) {
-        vm_error(vm, "out of memory");
+        vm_error_oom(vm);
         return NULL;
     }
     frame->closure = NULL;
@@ -149,7 +131,7 @@ int fh_call_vm_function(struct fh_vm *vm, struct fh_closure *closure,
         n_args = closure->func_def->n_params;
 
     struct fh_vm_call_frame *prev_frame = call_frame_stack_top(&vm->call_stack);
-    int ret_reg = (prev_frame) ? prev_frame->base + prev_frame->closure->func_def->n_regs : 0;
+    const int ret_reg = (prev_frame) ? prev_frame->base + prev_frame->closure->func_def->n_regs : 0;
 
     if (ensure_stack_size(vm, ret_reg + n_args + 1) < 0)
         return -1;
@@ -174,8 +156,7 @@ int fh_call_vm_function(struct fh_vm *vm, struct fh_closure *closure,
     return 0;
 }
 
-static int call_c_func(struct fh_vm *vm, fh_c_func func, struct fh_value *ret,
-                       struct fh_value *args, int n_args) {
+static int call_c_func(struct fh_vm *vm, fh_c_func func, struct fh_value *ret, struct fh_value *args, int n_args) {
     return func(vm->prog, ret, args, n_args);
 }
 
@@ -183,17 +164,19 @@ bool fh_val_is_true(struct fh_value *val) {
     if (val->type == FH_VAL_UPVAL)
         val = GET_OBJ_UPVAL(val)->val;
     switch (val->type) {
-        case FH_VAL_NULL: return false;
         case FH_VAL_BOOL: return val->data.b;
         case FH_VAL_FLOAT: return val->data.num != 0.0;
         case FH_VAL_STRING: return GET_VAL_STRING_DATA(val)[0] != '\0';
-        case FH_VAL_ARRAY: return true;
-        case FH_VAL_MAP: return true;
-        case FH_VAL_CLOSURE: return true;
-        case FH_VAL_FUNC_DEF: return true;
-        case FH_VAL_C_FUNC: return true;
-        case FH_VAL_C_OBJ: return true;
-        case FH_VAL_UPVAL: return false;
+        case FH_VAL_NULL:
+        case FH_VAL_UPVAL:
+            return false;
+        case FH_VAL_ARRAY:
+        case FH_VAL_MAP:
+        case FH_VAL_CLOSURE:
+        case FH_VAL_FUNC_DEF:
+        case FH_VAL_C_FUNC:
+        case FH_VAL_C_OBJ:
+            return true;
     }
     return false;
 }
@@ -224,10 +207,7 @@ bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
             struct fh_string *s1 = GET_VAL_STRING(v1);
             struct fh_string *s2 = GET_VAL_STRING(v2);
 
-            if (s1->hash != s2->hash)
-                return false;
-
-            if (s1->size != s2->size)
+            if ((s1->hash != s2->hash) || (s1->size != s2->size))
                 return false;
 
             const char *p1 = GET_OBJ_STRING_DATA(v1->data.obj);
@@ -456,64 +436,69 @@ changed_stack_frame: {
             handle_op(OPC_GETEL) {
                 struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
                 struct fh_value *rc = LOAD_REG_OR_CONST(GET_INSTR_RC(instr));
-                if (rb->type == FH_VAL_ARRAY) {
-                    // uint32_t idx;
-                    // if (vm_assert_index(vm, rc, &idx, "array") < 0)
-                    //     goto user_err;
-                    //
-                    // struct fh_array *arr = GET_OBJ_ARRAY(rb->data.obj);
-                    // if (idx >= (uint32_t) arr->len) {
-                    //     ra->type = FH_VAL_NULL;
-                    // } else {
-                    //     *ra = arr->items[idx];
-                    // }
-                    uint32_t idx = (uint32_t) rc->data.num; // no check
-                    struct fh_array *arr = GET_OBJ_ARRAY(rb->data.obj);
-                    if (idx < (uint32_t) arr->len) *ra = arr->items[idx];
-                    else ra->type = FH_VAL_NULL;
-                    break;
-                }
-                if (rb->type == FH_VAL_MAP) {
-                    // if (rc->type == FH_VAL_NULL) {
-                    //     *ra = fh_new_null();
-                    //     break;
-                    // }
-                    // if (rc->type == FH_VAL_FLOAT && !isfinite(rc->data.num)) {
-                    //     *ra = fh_new_null();
-                    //     break;
-                    // }
 
-                    if (fh_get_map_value(rb, rc, ra) < 0) {
-                        *ra = fh_new_null();
-                    }
-                    break;
-                }
-                if (rb->type == FH_VAL_STRING) {
-                    uint32_t idx;
-                    if (vm_assert_index(vm, rc, &idx, "string") < 0)
-                        goto user_err;
-
-                    struct fh_string *s = GET_VAL_STRING(rb);
-                    uint32_t len = s->size ? (s->size - 1) : 0;
-                    if (idx >= len) {
-                        *ra = fh_new_null();
+                switch (rb->type) {
+                    case FH_VAL_ARRAY: {
+                        uint32_t idx;
+                        if (vm_assert_index(vm, rc, &idx, "array") < 0)
+                            goto user_err;
+                        //
+                        // struct fh_array *arr = GET_OBJ_ARRAY(rb->data.obj);
+                        // if (idx >= (uint32_t) arr->len) {
+                        //     ra->type = FH_VAL_NULL;
+                        // } else {
+                        //     *ra = arr->items[idx];
+                        // }
+                        // uint32_t idx = (uint32_t) rc->data.num; // no check
+                        const struct fh_array *arr = GET_OBJ_ARRAY(rb->data.obj);
+                        if (idx < arr->len) *ra = arr->items[idx];
+                        else ra->type = FH_VAL_NULL;
                         break;
                     }
-                    const char out[2] = {GET_OBJ_STRING_DATA(s)[idx], '\0'};
-                    *ra = fh_new_string(vm->prog, out);
-                    break;
+                    case FH_VAL_MAP: {
+                        // if (rc->type == FH_VAL_NULL) {
+                        //     *ra = fh_new_null();
+                        //     break;
+                        // }
+                        // if (rc->type == FH_VAL_FLOAT && !isfinite(rc->data.num)) {
+                        //     *ra = fh_new_null();
+                        //     break;
+                        // }
+
+                        if (fh_get_map_value(rb, rc, ra) < 0) {
+                            *ra = fh_new_null();
+                        }
+                        break;
+                    }
+                    case FH_VAL_STRING: {
+                        uint32_t idx;
+                        if (vm_assert_index(vm, rc, &idx, "string") < 0)
+                            goto user_err;
+
+                        struct fh_string *s = GET_VAL_STRING(rb);
+                        uint32_t len = s->size ? (s->size - 1) : 0;
+                        if (idx >= len) {
+                            *ra = fh_new_null();
+                            break;
+                        }
+                        const char out[2] = {GET_OBJ_STRING_DATA(s)[idx], '\0'};
+                        *ra = fh_new_string(vm->prog, out);
+                        break;
+                    }
+                    default:
+                        vm_error(vm, "invalid element access (non-container object)");
+                        goto user_err;
                 }
-                vm_error(vm, "invalid element access (non-container object)");
-                goto user_err;
+                break;
             }
 
             handle_op(OPC_SETEL) {
                 struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
                 struct fh_value *rc = LOAD_REG_OR_CONST(GET_INSTR_RC(instr));
                 if (ra->type == FH_VAL_ARRAY) {
-                    // uint32_t idx;
-                    // if (vm_assert_index(vm, rb, &idx, "array") < 0)
-                    //     goto user_err;
+                    uint32_t idx;
+                    if (vm_assert_index(vm, rb, &idx, "array") < 0)
+                        goto user_err;
                     //
                     // struct fh_array *arr = GET_OBJ_ARRAY(ra->data.obj);
                     //
@@ -522,7 +507,7 @@ changed_stack_frame: {
                     //     goto user_err;
                     // }
                     // FAST PATH (assume numeric index)
-                    uint32_t idx = (uint32_t) rb->data.num;
+                    // uint32_t idx = (uint32_t) rb->data.num;
 
                     struct fh_array *arr = GET_OBJ_ARRAY(ra->data.obj);
 
@@ -550,13 +535,6 @@ changed_stack_frame: {
                 if (!arr)
                     goto err;
 
-                // GC_PIN_OBJ(arr);
-                // if (!fh_reserve_array_capacity(vm->prog, arr, 8 + n_elems ? n_elems : 0)) {
-                //     GC_UNPIN_OBJ(arr);
-                //     goto err;
-                // }
-                // GC_UNPIN_OBJ(arr);
-
                 if (n_elems != 0) {
                     GC_PIN_OBJ(arr);
                     // struct fh_value *first = fh_grow_array_object(vm->prog, arr, n_elems);
@@ -580,11 +558,9 @@ changed_stack_frame: {
                 int n_elems_half = n_elems >> 1;
 
                 struct fh_map *map = fh_make_map(vm->prog, false);
-                if (!map)
+                if (!map || fh_alloc_map_object_len(map, n_elems) < 0)
                     goto err;
-                if (fh_alloc_map_object_len(map, n_elems) < 0) {
-                    goto err;
-                }
+
                 if (n_elems != 0) {
                     GC_PIN_OBJ(map);
                     for (int i = 0; i < n_elems_half; i++) {
@@ -708,7 +684,9 @@ changed_stack_frame: {
                 if (rb->type == FH_VAL_FLOAT && rc->type == FH_VAL_FLOAT) {
                     ra->type = FH_VAL_FLOAT;
                     ra->data.num = rb->data.num + rc->data.num;
-                } else if (rb->type == FH_VAL_STRING) {
+                    break;
+                }
+                if (rb->type == FH_VAL_STRING) {
                     const char *s1 = GET_OBJ_STRING_DATA(rb->data.obj);
                     if (rc->type == FH_VAL_STRING) {
                         const char *s2 = GET_OBJ_STRING_DATA(rc->data.obj);
@@ -724,7 +702,9 @@ changed_stack_frame: {
 
                         *ra = fh_new_string(vm->prog, concat);
                         free(concat);
-                    } else if (rc->type == FH_VAL_FLOAT) {
+                        break;
+                    }
+                    if (rc->type == FH_VAL_FLOAT) {
                         int needed = snprintf(NULL, 0, "%s%g", s1, rc->data.num);
                         if (needed < 0) {
                             vm_error(vm, "string formatting error");
@@ -741,13 +721,10 @@ changed_stack_frame: {
 
                         *ra = fh_new_string(vm->prog, concate);
                         free(concate);
-                    } else {
-                        vm_error(vm, "can't add the two variables, type %s and type %s",
-                                 fh_type_to_str(vm->prog, rb->type),
-                                 fh_type_to_str(vm->prog, rc->type));
-                        goto user_err;
+                        break;
                     }
-                } else if (rc->type == FH_VAL_STRING) {
+                }
+                if (rc->type == FH_VAL_STRING) {
                     const char *s1 = GET_OBJ_STRING_DATA(rc->data.obj);
                     if (rb->type == FH_VAL_STRING) {
                         const char *s2 = GET_OBJ_STRING_DATA(rb->data.obj);
@@ -781,12 +758,11 @@ changed_stack_frame: {
                         free(concate);
                         break;
                     }
-                    vm_error(vm, "can't add the two variables, type %s and type %s",
-                             fh_type_to_str(vm->prog, rb->type),
-                             fh_type_to_str(vm->prog, rc->type));
-                    goto user_err;
                 }
-                break;
+                vm_error(vm, "can't add the two variables, type %s and type %s",
+                         fh_type_to_str(vm->prog, rb->type),
+                         fh_type_to_str(vm->prog, rc->type));
+                goto user_err;
             }
 
             handle_op(OPC_SUB) {
@@ -934,23 +910,28 @@ changed_stack_frame: {
 
             handle_op(OPC_LEN) {
                 struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
-                if (rb->type == FH_VAL_ARRAY) {
-                    ra->type = FH_VAL_FLOAT;
-                    ra->data.num = GET_OBJ_ARRAY(rb->data.obj)->len;
-                    break;
+                switch (rb->type) {
+                    case FH_VAL_ARRAY: {
+                        ra->type = FH_VAL_FLOAT;
+                        ra->data.num = GET_OBJ_ARRAY(rb->data.obj)->len;
+                        break;
+                    }
+                    case FH_VAL_MAP: {
+                        ra->type = FH_VAL_FLOAT;
+                        ra->data.num = GET_OBJ_MAP(rb->data.obj)->len;
+                        break;
+                    }
+                    case FH_VAL_STRING: {
+                        ra->type = FH_VAL_FLOAT;
+                        ra->data.num = GET_VAL_STRING(rb)->size - 1;
+                        break;
+                    }
+                    default: {
+                        vm_error(vm, "len(): argument must be array/map/string");
+                        goto user_err;
+                    }
                 }
-                if (rb->type == FH_VAL_MAP) {
-                    ra->type = FH_VAL_FLOAT;
-                    ra->data.num = GET_OBJ_MAP(rb->data.obj)->len;
-                    break;
-                }
-                if (rb->type == FH_VAL_STRING) {
-                    ra->type = FH_VAL_FLOAT;
-                    ra->data.num = GET_VAL_STRING(rb)->size - 1;
-                    break;
-                }
-                vm_error(vm, "len(): argument must be array/map/string");
-                goto user_err;
+                break;
             }
 
             handle_op(OPC_APPEND) {

@@ -118,4 +118,6 @@ fn bench(frames, entities, spawnPerFrame) {
     printf("%f\n", checksum);
 }
 
-fn main() { bench(3600, 300, 3); }
+fn main() { ;
+       bench(3600, 300, 3); 
+}
