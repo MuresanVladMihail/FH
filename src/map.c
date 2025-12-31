@@ -100,7 +100,7 @@ static int rebuild(struct fh_map *map, uint32_t cap) {
         uint32_t idx = hash_to_index_pow2(&e->key, cap);
         idx = find_empty_slot(entries, cap, idx);
 
-        entries[idx] = *e; // copiem direct (key+val)
+        entries[idx] = *e;
     }
 
     free(map->entries);
@@ -248,18 +248,6 @@ static int map_reserve_empty(struct fh_map *map, uint32_t len_pow2_cap) {
 int fh_alloc_map_object_len(struct fh_map *map, const uint32_t len) {
     if (map->cap == 0) return map_reserve_empty(map, len << 1);
     return rebuild(map, len << 1);
-    // // round len up to the nearest power of 2
-    // len--;
-    // len |= len >> 1;
-    // len |= len >> 2;
-    // len |= len >> 4;
-    // len |= len >> 8;
-    // len |= len >> 16;
-    // len++;
-    //
-    // if (len < map->len)
-    //     return -1;
-    // return rebuild(map, len << 1);
 }
 
 /* value functions */
