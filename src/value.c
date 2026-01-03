@@ -196,13 +196,8 @@ const char *fh_get_func_def_name(struct fh_func_def *func_def) {
  * of program objects.
  *************************************************************************/
 
-static void *fh_make_object(struct fh_program *prog, bool pinned,
-                            enum fh_value_type type, size_t size) {
-    // if (size < sizeof(struct fh_object_header)) {
-    //     fh_set_error(prog, "object size too small");
-    //     return NULL;
-    // }
-
+static void *fh_make_object(struct fh_program *prog, const bool pinned, const enum fh_value_type type,
+                            const size_t size) {
     if (prog->gc_frequency >= prog->gc_collect_at) {
         fh_collect_garbage(prog);
         prog->gc_frequency = 0;
@@ -296,10 +291,10 @@ struct fh_c_obj *fh_make_c_obj(struct fh_program *prog, bool pinned,
 
 struct fh_string *fh_make_string_n(struct fh_program *prog, bool pinned,
                                    const char *str, size_t str_len) {
-    if (sizeof(struct fh_string) + str_len > UINT32_MAX)
+    const size_t size = sizeof(struct fh_string) + str_len;
+    if (size > UINT32_MAX)
         return NULL;
-    struct fh_string *s = fh_make_object(prog, pinned, FH_VAL_STRING,
-                                         sizeof(struct fh_string) + str_len);
+    struct fh_string *s = fh_make_object(prog, pinned, FH_VAL_STRING, size);
     if (!s)
         return NULL;
     memcpy(GET_OBJ_STRING_DATA(s), str, str_len);

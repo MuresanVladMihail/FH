@@ -301,7 +301,7 @@ static void mark_roots(struct fh_gc_state *gc, struct fh_program *prog) {
         int stack_size = cur_frame->stack_top;
         if (stack_size < 0) stack_size = 0;
 
-        struct fh_value *stack = prog->vm.stack;
+        const struct fh_value *stack = prog->vm.stack;
         debug_log1("***** marking %d stack values\n", stack_size);
         for (size_t i = 0; i < stack_size; i++)
             MARK_VALUE(gc, &stack[i]);

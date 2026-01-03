@@ -60,6 +60,12 @@ struct fh_program *fh_new_program(void) {
     struct fh_program *prog = malloc(sizeof(struct fh_program));
     if (!prog)
         return NULL;
+
+    map_init(&prog->global_funcs_map);
+    map_init(&prog->c_funcs_map);
+
+    vec_init(&prog->c_vals);
+    vec_init(&prog->pinned_objs);
     prog->gc_frequency = 0;
     prog->gc_collect_at = 1000000;
     prog->gc_isPaused = false;
@@ -74,12 +80,6 @@ struct fh_program *fh_new_program(void) {
     fh_init_parser(&prog->parser, prog);
     fh_init_compiler(&prog->compiler, prog);
     // p_object_stack_init(&prog->pinned_objs);
-
-    map_init(&prog->global_funcs_map);
-    map_init(&prog->c_funcs_map);
-
-    vec_init(&prog->c_vals);
-    vec_init(&prog->pinned_objs);
 
 
     if (fh_add_c_funcs(prog, fh_std_c_funcs, fh_std_c_funcs_len) < 0)
@@ -106,13 +106,9 @@ err:
 
 void fh_free_program(struct fh_program *prog) {
     prog->gc_isPaused = false;
-    // if (p_object_stack_size(&prog->pinned_objs) > 0)
-    if (prog->pinned_objs.length > 0)
-        fprintf(stderr, "*** WARNING: %d pinned object(s) on exit\n", prog->pinned_objs.length);
-    //p_object_stack_size(&prog->pinned_objs));
+    fh_destroy_char_cache(&prog->vm);
 
     fh_destroy_symtab(&prog->src_file_names);
-    // p_object_stack_free(&prog->pinned_objs);
     named_c_func_stack_free(&prog->c_funcs);
 
     fh_collect_garbage(prog);

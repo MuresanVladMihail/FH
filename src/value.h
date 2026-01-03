@@ -178,6 +178,8 @@ struct fh_string *fh_make_string_n(struct fh_program *prog, bool pinned, const c
 // object functions
 void fh_free_object(struct fh_program *prog, union fh_object *obj);
 
+bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2);
+
 struct fh_value *fh_grow_array_object(struct fh_program *prog, struct fh_array *arr, uint32_t num_items);
 
 struct fh_value *fh_grow_array_object_uninit(struct fh_program *prog, struct fh_array *arr, uint32_t num_items);

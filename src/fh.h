@@ -166,10 +166,6 @@ int fh_set_verror(struct fh_program *prog, const char *fmt, va_list ap);
 
 void fh_collect_garbage(struct fh_program *prog);
 
-bool fh_val_is_true(struct fh_value *val);
-
-bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2);
-
 #define fh_is_null(v)     ((v)->type == FH_VAL_NULL)
 #define fh_is_bool(v)     ((v)->type == FH_VAL_BOOL)
 #define fh_is_number(v)   ((v)->type == FH_VAL_FLOAT)

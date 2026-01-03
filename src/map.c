@@ -45,10 +45,6 @@ static uint32_t val_hash(const struct fh_value *val, uint32_t cap) {
             h = fh_hash(&val->data.obj, sizeof(void *));
             break;
 
-        case FH_VAL_NULL:
-            h = 0;
-            break;
-
         default:
             h = 0;
             break;
@@ -125,14 +121,12 @@ void fh_dump_map(struct fh_map *map) {
 }
 
 void fh_extends_map(struct fh_program *prog, struct fh_map *map, struct fh_map *from) {
-    uint32_t index;
-
     for (uint32_t i = 0; i < from->cap; i++) {
         struct fh_map_entry *e = &from->entries[i];
 
         if (OCCUPIED(e)) {
             if (map->cap > 0) {
-                index = find_slot(map->entries, map->cap, &e->key);
+                const uint32_t index = find_slot(map->entries, map->cap, &e->key);
                 /* We want to prevent from overriding child classes with the parent one (the extend) */
                 if (!OCCUPIED(&map->entries[index]))
                     fh_add_map_object_entry(prog, map, &e->key, &e->val);

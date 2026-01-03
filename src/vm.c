@@ -15,6 +15,21 @@
 #define FH_MAXSHORTLEN 40
 #endif
 
+static void fh_init_char_cache(struct fh_vm *vm) {
+    for (int i = 0; i < 256; i++) {
+        const char s[2] = {(char) i, '\0'};
+
+        struct fh_string *str = fh_make_string_n(vm->prog, true, s, 2);
+        if (!str) {
+            vm->char_cache[i] = vm->prog->null_value;
+            continue;
+        }
+
+        vm->char_cache[i].type = FH_VAL_STRING;
+        vm->char_cache[i].data.obj = str;
+    }
+}
+
 void fh_init_vm(struct fh_vm *vm, struct fh_program *prog) {
     vm->prog = prog;
     vm->stack = NULL;
@@ -24,12 +39,22 @@ void fh_init_vm(struct fh_vm *vm, struct fh_program *prog) {
     vm->last_error_addr = -1;
     vm->last_error_frame_index = -1;
     call_frame_stack_init_cap(&vm->call_stack, 8192);
+    fh_init_char_cache(vm);
 }
 
 void fh_destroy_vm(struct fh_vm *vm) {
     if (vm->stack)
         free(vm->stack);
     call_frame_stack_free(&vm->call_stack);
+}
+
+void fh_destroy_char_cache(struct fh_vm *vm) {
+    for (int i = 0; i < 256; i++) {
+        const struct fh_value *v = &vm->char_cache[i];
+        if (v->type == FH_VAL_STRING && v->data.obj != NULL) {
+            GC_UNPIN_OBJ((union fh_object*)v->data.obj);
+        }
+    }
 }
 
 static int vm_error(struct fh_vm *vm, char *fmt, ...) {
@@ -44,7 +69,7 @@ static int vm_error_oom(struct fh_vm *vm) {
     return vm_error(vm, "out of memory");
 }
 
-static int ensure_stack_size(struct fh_vm *vm, size_t size) {
+static int ensure_stack_size(struct fh_vm *vm, const size_t size) {
     if (vm->stack_size >= size)
         return 0;
     const size_t new_size = (size + 1023u) & ~(size_t) 1023u;
@@ -77,7 +102,7 @@ static struct fh_vm_call_frame *prepare_call(struct fh_vm *vm, struct fh_closure
         }
     }
 
-    struct fh_vm_call_frame *frame = call_frame_stack_push(&vm->call_stack, NULL);
+    struct fh_vm_call_frame *frame = call_frame_stack_push_uninit(&vm->call_stack);
     if (!frame) {
         vm_error_oom(vm);
         return NULL;
@@ -94,7 +119,7 @@ static struct fh_vm_call_frame *prepare_c_call(struct fh_vm *vm, int ret_reg, in
     if (ensure_stack_size(vm, ret_reg + 1 + n_args) < 0)
         return NULL;
 
-    struct fh_vm_call_frame *frame = call_frame_stack_push(&vm->call_stack, NULL);
+    struct fh_vm_call_frame *frame = call_frame_stack_push_uninit(&vm->call_stack);
     if (!frame) {
         vm_error_oom(vm);
         return NULL;
@@ -130,14 +155,14 @@ static void dump_regs(struct fh_vm *vm) {
 
 int fh_call_vm_function(struct fh_vm *vm, struct fh_closure *closure,
                         struct fh_value *args, int n_args, struct fh_value *ret) {
-    if (n_args > closure->func_def->n_params)
-        n_args = closure->func_def->n_params;
+    const struct fh_func_def *fh_func_def = closure->func_def;
+    if (n_args > fh_func_def->n_params)
+        n_args = fh_func_def->n_params;
 
     struct fh_vm_call_frame *prev_frame = call_frame_stack_top(&vm->call_stack);
     const int ret_reg = (prev_frame) ? prev_frame->base + prev_frame->closure->func_def->n_regs : 0;
 
-    if (ensure_stack_size(vm, ret_reg + n_args + 1) < 0)
-        return -1;
+    ensure_stack_size(vm, ret_reg + n_args + 1);
 
     // memset(&vm->stack[ret_reg], 0, sizeof(struct fh_value));
     vm->stack[ret_reg].type = FH_VAL_NULL;
@@ -151,7 +176,7 @@ int fh_call_vm_function(struct fh_vm *vm, struct fh_closure *closure,
 
     if (!prepare_call(vm, closure, ret_reg, n_args))
         return -1;
-    vm->pc = closure->func_def->code;
+    vm->pc = fh_func_def->code;
     if (fh_run_vm(vm) < 0)
         return -2;
     if (ret)
@@ -159,11 +184,7 @@ int fh_call_vm_function(struct fh_vm *vm, struct fh_closure *closure,
     return 0;
 }
 
-static int call_c_func(struct fh_vm *vm, fh_c_func func, struct fh_value *ret, struct fh_value *args, int n_args) {
-    return func(vm->prog, ret, args, n_args);
-}
-
-bool fh_val_is_true(struct fh_value *val) {
+static bool fh_val_is_true(struct fh_value *val) {
     if (val->type == FH_VAL_UPVAL)
         val = GET_OBJ_UPVAL(val)->val;
     switch (val->type) {
@@ -212,7 +233,7 @@ bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
 
             if (v1->data.obj == v2->data.obj) return true;
 
-            if ((s1->hash != s2->hash) || (s1->size != s2->size))
+            if (s1->hash != s2->hash || s1->size != s2->size)
                 return false;
 
             const char *p1 = GET_OBJ_STRING_DATA(v1->data.obj);
@@ -222,6 +243,30 @@ bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
         }
     }
     return false;
+}
+
+static inline int vm_assert_index_fast(struct fh_vm *vm, const struct fh_value *idx_val, uint32_t *out,
+                                       const char *what) {
+    if (idx_val->type != FH_VAL_FLOAT) {
+        vm_error(vm, "invalid %s access (non-numeric index)", what);
+        return -1;
+    }
+
+    const double d = idx_val->data.num;
+
+    if (!(d >= 0.0)) {
+        vm_error(vm, "invalid %s access (index out of range)", what);
+        return -1;
+    }
+
+    const uint32_t u = (uint32_t) d;
+    if ((double) u == d) {
+        *out = u;
+        return 0;
+    }
+
+    vm_error(vm, "invalid %s access (non-integer index)", what);
+    return -1;
 }
 
 static inline int vm_assert_index(struct fh_vm *vm, const struct fh_value *idx_val, uint32_t *out_index,
@@ -366,594 +411,688 @@ static void save_error_loc(struct fh_vm *vm) {
 }
 
 int fh_run_vm(struct fh_vm *vm) {
-    struct fh_value *const_base;
-    struct fh_value *reg_base;
+#if !defined(__clang__) && !defined(__GNUC__)
+#error "computed goto (direct-threaded dispatch) requires Clang or GCC"
+#endif
+
+    // --- HOT LOCALS (keep everything in registers as much as possible)
+    struct fh_vm_call_frame *frame = NULL;
+    struct fh_value *stack = vm->stack;
 
     uint32_t *pc = vm->pc;
+    struct fh_value *reg_base = NULL;
+    struct fh_value *const_base = NULL;
+
     int cmp_test = 0;
-    struct fh_vm_call_frame *frame = NULL;
 
-changed_stack_frame: {
-        frame = call_frame_stack_top(&vm->call_stack);
-        const_base = frame->closure->func_def->consts;
-        reg_base = vm->stack + frame->base;
+    // --- helpers/macros that need reg_base/const_base
+#define LOAD_REG(index) (&reg_base[(index)])
+#define LOAD_CONST(index) (&const_base[(index) - MAX_FUNC_REGS - 1])
+#define LOAD_REG_OR_CONST(index) \
+    (((index) < MAX_FUNC_REGS) ? (&reg_base[(index)]) : (&const_base[(index) - MAX_FUNC_REGS - 1]))
+
+    // --- decode fields (kept in locals)
+    uint32_t op = 0;
+    uint32_t ra_i = 0, rb_i = 0, rc_i = 0;
+    uint32_t ru = 0;
+    int32_t rs = 0;
+    struct fh_value *ra = NULL;
+
+    // --- dispatch table (must cover all opcodes you execute)
+    static void *dispatch[] = {
+        [OPC_LDC] = &&op_LDC,
+        [OPC_LDNULL] = &&op_LDNULL,
+        [OPC_MOV] = &&op_MOV,
+        [OPC_RET] = &&op_RET,
+        [OPC_GETEL] = &&op_GETEL,
+        [OPC_SETEL] = &&op_SETEL,
+        [OPC_NEWARRAY] = &&op_NEWARRAY,
+        [OPC_NEWMAP] = &&op_NEWMAP,
+        [OPC_CLOSURE] = &&op_CLOSURE,
+        [OPC_GETUPVAL] = &&op_GETUPVAL,
+        [OPC_SETUPVAL] = &&op_SETUPVAL,
+
+        [OPC_BNOT] = &&op_BNOT,
+        [OPC_RSHIFT] = &&op_RSHIFT,
+        [OPC_LSHIFT] = &&op_LSHIFT,
+        [OPC_BOR] = &&op_BOR,
+        [OPC_BAND] = &&op_BAND,
+        [OPC_BXOR] = &&op_BXOR,
+
+        [OPC_INC] = &&op_INC,
+        [OPC_DEC] = &&op_DEC,
+
+        [OPC_ADD] = &&op_ADD,
+        [OPC_SUB] = &&op_SUB,
+        [OPC_MUL] = &&op_MUL,
+        [OPC_DIV] = &&op_DIV,
+        [OPC_MOD] = &&op_MOD,
+        [OPC_NEG] = &&op_NEG,
+        [OPC_NOT] = &&op_NOT,
+
+        [OPC_CALL] = &&op_CALL,
+
+        [OPC_JMP] = &&op_JMP,
+        [OPC_TEST] = &&op_TEST,
+
+        [OPC_CMP_EQ] = &&op_CMP_EQ,
+        [OPC_CMP_GT] = &&op_CMP_GT,
+        [OPC_CMP_GE] = &&op_CMP_GE,
+        [OPC_CMP_LT] = &&op_CMP_LT,
+        [OPC_CMP_LE] = &&op_CMP_LE,
+
+        [OPC_LEN] = &&op_LEN,
+        [OPC_APPEND] = &&op_APPEND,
+    };
+
+    // --- fast dispatch macro
+#define DISPATCH() do { \
+        uint32_t instr__ = *pc++; \
+        op   = GET_INSTR_OP(instr__); \
+        ra_i = GET_INSTR_RA(instr__); \
+        rb_i = GET_INSTR_RB(instr__); \
+        rc_i = GET_INSTR_RC(instr__); \
+        ru   = GET_INSTR_RU(instr__); \
+        rs   = GET_INSTR_RS(instr__); \
+        ra   = &reg_base[ra_i]; \
+        goto *dispatch[op]; \
+    } while (0)
+
+    // Rebind on entry
+rebind_frame:
+    frame = call_frame_stack_top(&vm->call_stack);
+    // (you assume frame exists here)
+    const_base = frame->closure->func_def->consts;
+    stack = vm->stack; // stack pointer can move after realloc
+    reg_base = stack + frame->base;
+
+    DISPATCH();
+
+    // -----------------------------
+    //   OPCODES (labels)
+    // -----------------------------
+
+op_LDC: {
+        *ra = const_base[ru];
+        DISPATCH();
     }
-    while (1) {
-        //dump_regs(vm);
-        //fh_dump_bc_instr(vm->prog, -1, *pc);
 
-        uint32_t instr = *pc++;
-        uint32_t ra_i = GET_INSTR_RA(instr);
-        uint32_t op = GET_INSTR_OP(instr);
-        uint32_t rb_i = GET_INSTR_RB(instr);
-        uint32_t rc_i = GET_INSTR_RC(instr);
-        struct fh_value *ra = &reg_base[ra_i];
-        switch (op) {
-            handle_op(OPC_LDC) {
-                *ra = const_base[GET_INSTR_RU(instr)];
+op_LDNULL: {
+        ra->type = FH_VAL_NULL;
+        DISPATCH();
+    }
+
+op_MOV: {
+        *ra = *LOAD_REG_OR_CONST(rb_i);
+        DISPATCH();
+    }
+
+op_RET: {
+        if (ra_i)
+            stack[frame->base - 1] = *LOAD_REG_OR_CONST(rb_i);
+        else
+            stack[frame->base - 1].type = FH_VAL_NULL;
+
+        // close function upvalues (only those belonging to this frame)
+        struct fh_value *frame_start = stack + frame->base;
+        struct fh_value *frame_end = stack + frame->stack_top;
+
+        while (vm->open_upvals != NULL) {
+            struct fh_value *p = vm->open_upvals->val;
+            if (p < frame_start || p >= frame_end)
+                break;
+            close_upval(vm);
+        }
+
+        uint32_t *ret_addr = frame->ret_addr;
+        call_frame_stack_pop(&vm->call_stack, NULL);
+
+        if (!ret_addr) {
+            vm->pc = pc;
+            return 0;
+        }
+
+        frame = call_frame_stack_top(&vm->call_stack);
+        if (!frame || !frame->closure) {
+            vm->pc = pc;
+            return 0;
+        }
+
+        pc = ret_addr;
+        goto rebind_frame;
+    }
+
+op_GETEL: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+
+        switch (rb->type) {
+            case FH_VAL_ARRAY: {
+                uint32_t idx;
+                if (vm_assert_index_fast(vm, rc, &idx, "array") < 0)
+                    goto user_err;
+
+                const struct fh_array *arr = GET_OBJ_ARRAY(rb->data.obj);
+                if (idx < arr->len) *ra = arr->items[idx];
+                else ra->type = FH_VAL_NULL;
                 break;
             }
-
-            handle_op(OPC_LDNULL) {
-                ra->type = FH_VAL_NULL;
-                break;
-            }
-
-            handle_op(OPC_MOV) {
-                *ra = *LOAD_REG_OR_CONST(rb_i);
-                break;
-            }
-
-            handle_op(OPC_RET) {
-                if (ra_i)
-                    vm->stack[frame->base - 1] = *LOAD_REG_OR_CONST(rb_i);
-                else
-                    vm->stack[frame->base - 1].type = FH_VAL_NULL;
-
-                // close function upvalues (only those belonging to this frame)
-                struct fh_value *frame_start = vm->stack + frame->base;
-                struct fh_value *frame_end = vm->stack + frame->stack_top;
-
-                while (vm->open_upvals != NULL) {
-                    struct fh_value *p = vm->open_upvals->val;
-
-                    // if already closed, p won't point into vm->stack; stop because list is ordered by stack slots
-                    if (p < frame_start || p >= frame_end)
-                        break;
-
-                    close_upval(vm);
+            case FH_VAL_MAP: {
+                const double d = rc->data.num;
+                if (!(d >= 0.0 && d < 4294967296.0)) {
+                    vm_error(vm, "invalid %d access (index out of range)", d);
+                    goto user_err;
                 }
-
-                uint32_t *ret_addr = frame->ret_addr;
-                call_frame_stack_pop(&vm->call_stack, NULL);
-                if (!ret_addr) {
-                    vm->pc = pc;
-                    return 0;
-                }
-
-                frame = call_frame_stack_top(&vm->call_stack);
-                if (!frame || !frame->closure) {
-                    vm->pc = pc;
-                    return 0;
-                }
-
-                pc = ret_addr;
-                goto changed_stack_frame;
-            }
-
-            handle_op(OPC_GETEL) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
-                struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
-
-                switch (rb->type) {
-                    case FH_VAL_ARRAY: {
-                        uint32_t idx;
-                        if (vm_assert_index(vm, rc, &idx, "array") < 0)
-                            goto user_err;
-
-                        const struct fh_array *arr = GET_OBJ_ARRAY(rb->data.obj);
-                        if (idx < arr->len) *ra = arr->items[idx];
-                        else ra->type = FH_VAL_NULL;
-                        break;
-                    }
-                    case FH_VAL_MAP: {
-                        const double d = rc->data.num;
-
-                        if (!(d >= 0.0 && d < 4294967296.0)) {
-                            vm_error(vm, "invalid %d access (index out of range)", d);
-                            return -1;
-                        }
-
-                        if (fh_get_map_value(rb, rc, ra) < 0) {
-                            *ra = fh_new_null();
-                        }
-                        break;
-                    }
-                    case FH_VAL_STRING: {
-                        uint32_t idx;
-                        if (vm_assert_index(vm, rc, &idx, "string") < 0)
-                            goto user_err;
-
-                        struct fh_string *s = GET_VAL_STRING(rb);
-                        if (idx >= s->size - 1) {
-                            *ra = fh_new_null();
-                            break;
-                        }
-                        const char out[2] = {GET_OBJ_STRING_DATA(s)[idx], '\0'};
-                        *ra = fh_new_string(vm->prog, out);
-                        break;
-                    }
-                    default:
-                        vm_error(vm, "invalid element access (non-container object)");
-                        goto user_err;
+                if (fh_get_map_value(rb, rc, ra) < 0) {
+                    *ra = fh_new_null();
                 }
                 break;
             }
+            case FH_VAL_STRING: {
+                uint32_t idx;
+                if (vm_assert_index_fast(vm, rc, &idx, "string") < 0)
+                    goto user_err;
 
-            handle_op(OPC_SETEL) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
-                struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
-                if (ra->type == FH_VAL_ARRAY) {
-                    uint32_t idx;
-                    if (vm_assert_index(vm, rb, &idx, "array") < 0)
-                        goto user_err;
-
-                    struct fh_array *arr = GET_OBJ_ARRAY(ra->data.obj);
-
-                    if (idx < arr->len) {
-                        arr->items[idx] = *rc;
-                    } else {
-                        vm_error(vm, "array index out of bounds");
-                        goto user_err;
-                    }
-
+                struct fh_string *s = GET_VAL_STRING(rb);
+                if (idx >= (uint32_t) (s->size - 1)) {
+                    *ra = fh_new_null();
                     break;
                 }
-                if (ra->type == FH_VAL_MAP) {
-                    if (fh_add_map_entry(vm->prog, ra, rb, rc) < 0)
-                        goto err;
-                    break;
-                }
+
+                unsigned char ch = (unsigned char) GET_OBJ_STRING_DATA(s)[idx];
+                *ra = vm->char_cache[ch];
+                break;
+            }
+            default:
                 vm_error(vm, "invalid element access (non-container object)");
                 goto user_err;
-            }
-
-            handle_op(OPC_NEWARRAY) {
-                int n_elems = GET_INSTR_RU(instr);
-
-                struct fh_array *arr = fh_make_array(vm->prog, false);
-                if (!arr)
-                    goto err;
-
-                if (n_elems != 0) {
-                    GC_PIN_OBJ(arr);
-                    // struct fh_value *first = fh_grow_array_object(vm->prog, arr, n_elems);
-                    struct fh_value *first = fh_grow_array_object_uninit(vm->prog, arr, n_elems);
-                    if (!first) {
-                        GC_UNPIN_OBJ(arr);
-                        goto err;
-                    }
-                    GC_UNPIN_OBJ(arr);
-                    memcpy(first, ra + 1, n_elems*sizeof(struct fh_value));
-                } else {
-                    fh_reserve_array_capacity(vm->prog, arr, 128);
-                }
-                ra->type = FH_VAL_ARRAY;
-                ra->data.obj = arr;
-                break;
-            }
-
-            handle_op(OPC_NEWMAP) {
-                int n_elems = GET_INSTR_RU(instr);
-                int n_elems_half = n_elems >> 1;
-
-                struct fh_map *map = fh_make_map(vm->prog, false);
-                if (!map || fh_alloc_map_object_len(map, n_elems) < 0)
-                    goto err;
-
-                if (n_elems != 0) {
-                    GC_PIN_OBJ(map);
-                    for (int i = 0; i < n_elems_half; i++) {
-                        int ni = i << 1;
-                        struct fh_value *key = &ra[ni + 1];
-                        struct fh_value *val = &ra[ni + 2];
-                        if (fh_add_map_object_entry(vm->prog, map, key, val) < 0) {
-                            GC_UNPIN_OBJ(map);
-                            goto err;
-                        }
-                    }
-                    GC_UNPIN_OBJ(map);
-                }
-                ra->type = FH_VAL_MAP;
-                ra->data.obj = map;
-                break;
-            }
-
-            handle_op(OPC_CLOSURE) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
-                if (rb->type != FH_VAL_FUNC_DEF) {
-                    vm_error(vm, "invalid value for closure (not a func_def)");
-                    goto err;
-                }
-                struct fh_func_def *func_def = GET_VAL_FUNC_DEF(rb);
-                struct fh_closure *c = fh_make_closure(vm->prog, false, func_def);
-                if (!c)
-                    goto err;
-                GC_PIN_OBJ(c);
-                // struct fh_vm_call_frame *frame = NULL;
-                for (int i = 0; i < func_def->n_upvals; i++) {
-                    if (func_def->upvals[i].type == FH_UPVAL_TYPE_UPVAL) {
-                        // if (frame == NULL)
-                        // frame = call_frame_stack_top(&vm->call_stack);
-                        c->upvals[i] = frame->closure->upvals[func_def->upvals[i].num];
-                    } else {
-                        c->upvals[i] = find_or_add_upval(vm, &reg_base[func_def->upvals[i].num]);
-                        GC_PIN_OBJ(c->upvals[i]);
-                    }
-                }
-                ra->type = FH_VAL_CLOSURE;
-                ra->data.obj = c;
-                for (int i = 0; i < func_def->n_upvals; i++)
-                    GC_UNPIN_OBJ(c->upvals[i]);
-                GC_UNPIN_OBJ(c);
-                break;
-            }
-
-            handle_op(OPC_GETUPVAL) {
-                //TODO am scos? struct fh_vm_call_frame *frame = call_frame_stack_top(&vm->call_stack);
-                *ra = *frame->closure->upvals[rb_i]->val;
-                break;
-            }
-
-            handle_op(OPC_SETUPVAL) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
-                //TODO am scos? struct fh_vm_call_frame *frame = call_frame_stack_top(&vm->call_stack);
-                *frame->closure->upvals[ra_i]->val = *rb;
-                break;
-            }
-
-            handle_op(OPC_BNOT) {
-                do_simple_arithmetic_unary(~(int), ra, instr);
-                break;
-            }
-
-            handle_op(OPC_RSHIFT) {
-                do_bitwise_arithmetic(>>, ra, rb_i, rc_i);
-                break;
-            }
-
-            handle_op(OPC_LSHIFT) {
-                do_bitwise_arithmetic(<<, ra, rb_i, rc_i);
-                break;
-            }
-
-            handle_op(OPC_BOR) {
-                do_bitwise_arithmetic(|, ra, rb_i, rc_i);
-                break;
-            }
-
-            handle_op(OPC_BAND) {
-                do_bitwise_arithmetic(&, ra, rb_i, rc_i);
-                break;
-            }
-
-            handle_op(OPC_BXOR) {
-                do_bitwise_arithmetic(^, ra, rb_i, rc_i);
-                break;
-            }
-
-            handle_op(OPC_INC) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
-                if (rb->type != FH_VAL_FLOAT) {
-                    vm_error(vm, "increment on non-numeric value");
-                    goto user_err;
-                }
-                ra->type = FH_VAL_FLOAT;
-                ra->data.num = rb->data.num + 1.0;
-                break;
-            }
-
-            handle_op(OPC_DEC) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
-                if (rb->type != FH_VAL_FLOAT) {
-                    vm_error(vm, "decrement on non-numeric value");
-                    goto user_err;
-                }
-                ra->type = FH_VAL_FLOAT;
-                ra->data.num = rb->data.num - 1.0;
-                break;
-            }
-            handle_op(OPC_ADD) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
-                struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
-
-                if (rb->type == FH_VAL_FLOAT && rc->type == FH_VAL_FLOAT) {
-                    ra->type = FH_VAL_FLOAT;
-                    ra->data.num = rb->data.num + rc->data.num;
-                    break;
-                }
-                if (rb->type == FH_VAL_STRING) {
-                    const char *s1 = GET_OBJ_STRING_DATA(rb->data.obj);
-                    if (rc->type == FH_VAL_STRING) {
-                        const char *s2 = GET_OBJ_STRING_DATA(rc->data.obj);
-
-                        const size_t len = strlen(s1) + strlen(s2) + 1;
-                        if (len <= FH_MAXSHORTLEN) {
-                            char concat[FH_MAXSHORTLEN];
-                            snprintf(concat, len, "%s%s", s1, s2);
-                            *ra = fh_new_string(vm->prog, concat);
-                            break;
-                        }
-                        char *concat = malloc(len);
-                        if (!concat) {
-                            vm_error(vm, "out of memory");
-                            goto err;
-                        }
-
-                        snprintf(concat, len, "%s%s", s1, s2);
-
-                        *ra = fh_new_string(vm->prog, concat);
-                        free(concat);
-                        break;
-                    }
-                    if (rc->type == FH_VAL_FLOAT) {
-                        int needed = snprintf(NULL, 0, "%s%g", s1, rc->data.num);
-                        if (needed < 0) {
-                            vm_error(vm, "string formatting error");
-                            goto err;
-                        }
-
-                        size_t size = (size_t) needed + 1;
-                        if (size <= FH_MAXSHORTLEN) {
-                            char concate[FH_MAXSHORTLEN];
-                            snprintf(concate, size, "%s%g", s1, rc->data.num);
-                            *ra = fh_new_string(vm->prog, concate);
-                            break;
-                        }
-                        char *concate = malloc(size);
-                        if (!concate) {
-                            vm_error(vm, "out of memory");
-                            goto err;
-                        }
-
-                        snprintf(concate, size, "%s%g", s1, rc->data.num);
-
-                        *ra = fh_new_string(vm->prog, concate);
-                        free(concate);
-                        break;
-                    }
-                }
-                if (rc->type == FH_VAL_STRING) {
-                    const char *s1 = GET_OBJ_STRING_DATA(rc->data.obj);
-                    if (rb->type == FH_VAL_STRING) {
-                        const char *s2 = GET_OBJ_STRING_DATA(rb->data.obj);
-
-                        const size_t len = strlen(s1) + strlen(s2) + 1;
-                        char *concate = malloc(len);
-                        if (!concate) {
-                            vm_error(vm, "out of memory");
-                            goto err;
-                        }
-                        snprintf(concate, len, "%s%s", s1, s2);
-
-                        *ra = fh_new_string(vm->prog, concate);
-                        free(concate);
-                        break;
-                    }
-                    if (rb->type == FH_VAL_FLOAT) {
-                        int needed = snprintf(NULL, 0, "%g%s", rb->data.num, s1) + 1;
-                        if (needed < 0) {
-                            vm_error(vm, "string formatting error");
-                            goto err;
-                        }
-                        char *concate = malloc(needed);
-                        if (!concate) {
-                            vm_error(vm, "out of memory");
-                            goto err;
-                        }
-                        snprintf(concate, needed, "%g%s", rb->data.num, s1);
-
-                        *ra = fh_new_string(vm->prog, concate);
-                        free(concate);
-                        break;
-                    }
-                }
-                vm_error(vm, "can't add the two variables, type %s and type %s",
-                         fh_type_to_str(vm->prog, rb->type),
-                         fh_type_to_str(vm->prog, rc->type));
-                goto user_err;
-            }
-
-            handle_op(OPC_SUB) {
-                do_simple_arithmetic(-, ra, rb_i, rc_i);
-                break;
-            }
-
-            handle_op(OPC_MUL) {
-                do_simple_arithmetic(*, ra, rb_i, rc_i);
-                break;
-            }
-
-            handle_op(OPC_DIV) {
-                do_simple_arithmetic(/, ra, rb_i, rc_i);
-                break;
-            }
-
-            handle_op(OPC_MOD) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
-                struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
-                if (rb->type != FH_VAL_FLOAT || rc->type != FH_VAL_FLOAT) {
-                    vm_error(vm, "arithmetic on non-numeric values");
-                    goto user_err;
-                }
-                ra->type = FH_VAL_FLOAT;
-                ra->data.num = fmod(rb->data.num, rc->data.num);
-                break;
-            }
-
-            handle_op(OPC_NEG) {
-                do_simple_arithmetic_unary(-, ra, rb_i);
-                break;
-            }
-
-            handle_op(OPC_NOT) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
-                *ra = fh_new_bool(! fh_val_is_true(rb));
-                break;
-            }
-
-            handle_op(OPC_CALL) {
-                //dump_regs(vm);
-                int ret_reg = (int) (ra - vm->stack); // <- slot absolut (R[A])
-                const uint8_t t = ra->type;
-
-                if (t == FH_VAL_CLOSURE) {
-                    struct fh_closure *cl = GET_OBJ_CLOSURE(ra->data.obj);
-                    uint32_t *func_addr = cl->func_def->code;
-                    /*
-                     * WARNING: prepare_call() may move the stack, so don't trust reg_base
-                     * or ra after calling it -- jumping to changed_stack_frame fixes it.
-                     */
-                    struct fh_vm_call_frame *new_frame = prepare_call(vm, cl, ret_reg, rb_i);
-                    if (!new_frame) goto err;
-
-                    new_frame->ret_addr = pc;
-                    pc = func_addr;
-                    goto changed_stack_frame;
-                }
-                if (t == FH_VAL_C_FUNC) {
-                    struct fh_vm_call_frame *new_frame = prepare_c_call(vm, ret_reg, rb_i);
-                    if (!new_frame) goto err;
-
-                    int r = call_c_func(vm, ra->data.c_func, vm->stack + new_frame->base - 1,
-                                        vm->stack + new_frame->base, rb_i);
-
-                    call_frame_stack_pop(&vm->call_stack, NULL);
-                    if (r < 0) goto user_err;
-                    // still in same bytecode function after C call
-                    frame = call_frame_stack_top(&vm->call_stack);
-                    const_base = frame->closure->func_def->consts;
-                    reg_base = vm->stack + frame->base;
-                    break;
-                }
-                vm_error(vm, "call to non-function value");
-                goto user_err;
-            }
-
-            handle_op(OPC_JMP) {
-                while (ra_i-- > 0) {
-                    if (!vm->open_upvals) break;
-                    close_upval(vm);
-                }
-                pc += GET_INSTR_RS(instr);
-                break;
-            }
-
-            handle_op(OPC_TEST) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
-                cmp_test = fh_val_is_true(rb) ^ ra_i;
-                if (cmp_test) {
-                    pc++;
-                    break;
-                }
-                pc += GET_INSTR_RS(*pc) + 1;
-                break;
-            }
-
-            handle_op(OPC_CMP_EQ) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
-                struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
-                cmp_test = fh_vals_are_equal(rb, rc) ^ ra_i;
-                if (cmp_test)
-                    pc++;
-                break;
-            }
-
-            handle_op(OPC_CMP_GT) {
-                cmp_test = 0;
-                do_test_arithmetic(>, &cmp_test, rb_i, rc_i);
-                if (cmp_test)
-                    pc++;
-                break;
-            }
-
-            handle_op(OPC_CMP_GE) {
-                cmp_test = 0;
-                do_test_arithmetic(>=, &cmp_test, rb_i, rc_i);
-                if (cmp_test)
-                    pc++;
-                break;
-            }
-
-            handle_op(OPC_CMP_LT) {
-                cmp_test = 0;
-                do_test_arithmetic(<, &cmp_test, rb_i, rc_i);
-                if (cmp_test)
-                    pc++;
-                break;
-            }
-
-            handle_op(OPC_CMP_LE) {
-                cmp_test = 0;
-                do_test_arithmetic(<=, &cmp_test, rb_i, rc_i);
-                if (cmp_test)
-                    pc++;
-                break;
-            }
-
-            handle_op(OPC_LEN) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
-                switch (rb->type) {
-                    case FH_VAL_ARRAY: {
-                        ra->type = FH_VAL_FLOAT;
-                        ra->data.num = GET_OBJ_ARRAY(rb->data.obj)->len;
-                        break;
-                    }
-                    case FH_VAL_MAP: {
-                        ra->type = FH_VAL_FLOAT;
-                        ra->data.num = GET_OBJ_MAP(rb->data.obj)->len;
-                        break;
-                    }
-                    case FH_VAL_STRING: {
-                        ra->type = FH_VAL_FLOAT;
-                        ra->data.num = GET_VAL_STRING(rb)->size - 1;
-                        break;
-                    }
-                    default: {
-                        vm_error(vm, "len(): argument must be array/map/string");
-                        goto user_err;
-                    }
-                }
-                break;
-            }
-
-            handle_op(OPC_APPEND) {
-                //append rA, rB(value), rC(array)
-                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i); // value
-                struct fh_value *rc = LOAD_REG_OR_CONST(rc_i); // array
-
-                if (rc->type != FH_VAL_ARRAY) {
-                    vm_error(vm, "append(): argument 1 must be array");
-                    goto user_err;
-                }
-
-                struct fh_array *arr = GET_OBJ_ARRAY(rc->data.obj);
-
-                GC_PIN_OBJ(arr);
-                struct fh_value *slot = fh_grow_array_object_uninit(vm->prog, arr, 1);
-                GC_UNPIN_OBJ(arr);
-                if (!slot) goto err;
-
-                *slot = *rb;
-                *ra = *rc;
-                break;
-            }
-
-            default:
-                vm_error(vm, "unhandled opcode");
-                goto err;
         }
+
+        DISPATCH();
     }
+
+op_SETEL: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+
+        if (ra->type == FH_VAL_ARRAY) {
+            uint32_t idx;
+            if (vm_assert_index(vm, rb, &idx, "array") < 0)
+                goto user_err;
+
+            struct fh_array *arr = GET_OBJ_ARRAY(ra->data.obj);
+            if (idx < arr->len) {
+                arr->items[idx] = *rc;
+            } else {
+                vm_error(vm, "array index out of bounds");
+                goto user_err;
+            }
+
+            DISPATCH();
+        }
+
+        if (ra->type == FH_VAL_MAP) {
+            if (fh_add_map_entry(vm->prog, ra, rb, rc) < 0)
+                goto err;
+            DISPATCH();
+        }
+
+        vm_error(vm, "invalid element access (non-container object)");
+        goto user_err;
+    }
+
+op_NEWARRAY: {
+        int n_elems = (int) ru;
+
+        struct fh_array *arr = fh_make_array(vm->prog, false);
+        if (!arr)
+            goto err;
+
+        if (n_elems != 0) {
+            GC_PIN_OBJ(arr);
+            struct fh_value *first = fh_grow_array_object_uninit(vm->prog, arr, n_elems);
+            if (!first) {
+                GC_UNPIN_OBJ(arr);
+                goto err;
+            }
+            GC_UNPIN_OBJ(arr);
+            memcpy(first, ra + 1, (size_t)n_elems * sizeof(struct fh_value));
+        } else {
+            fh_reserve_array_capacity(vm->prog, arr, 128);
+        }
+
+        ra->type = FH_VAL_ARRAY;
+        ra->data.obj = arr;
+        DISPATCH();
+    }
+
+op_NEWMAP: {
+        int n_elems = (int) ru;
+        int n_elems_half = n_elems >> 1;
+
+        struct fh_map *map = fh_make_map(vm->prog, false);
+        if (!map || fh_alloc_map_object_len(map, n_elems) < 0)
+            goto err;
+
+        if (n_elems != 0) {
+            GC_PIN_OBJ(map);
+            for (int i = 0; i < n_elems_half; i++) {
+                int ni = i << 1;
+                struct fh_value *key = &ra[ni + 1];
+                struct fh_value *val = &ra[ni + 2];
+                if (fh_add_map_object_entry(vm->prog, map, key, val) < 0) {
+                    GC_UNPIN_OBJ(map);
+                    goto err;
+                }
+            }
+            GC_UNPIN_OBJ(map);
+        }
+
+        ra->type = FH_VAL_MAP;
+        ra->data.obj = map;
+        DISPATCH();
+    }
+
+op_CLOSURE: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        if (rb->type != FH_VAL_FUNC_DEF) {
+            vm_error(vm, "invalid value for closure (not a func_def)");
+            goto err;
+        }
+
+        struct fh_func_def *func_def = GET_VAL_FUNC_DEF(rb);
+        struct fh_closure *c = fh_make_closure(vm->prog, false, func_def);
+        if (!c) goto err;
+
+        GC_PIN_OBJ(c);
+        for (int i = 0; i < func_def->n_upvals; i++) {
+            if (func_def->upvals[i].type == FH_UPVAL_TYPE_UPVAL) {
+                c->upvals[i] = frame->closure->upvals[func_def->upvals[i].num];
+            } else {
+                c->upvals[i] = find_or_add_upval(vm, &reg_base[func_def->upvals[i].num]);
+                GC_PIN_OBJ(c->upvals[i]);
+            }
+        }
+
+        ra->type = FH_VAL_CLOSURE;
+        ra->data.obj = c;
+
+        for (int i = 0; i < func_def->n_upvals; i++) {
+            if (func_def->upvals[i].type != FH_UPVAL_TYPE_UPVAL) {
+                GC_UNPIN_OBJ(c->upvals[i]);
+            }
+        }
+        GC_UNPIN_OBJ(c);
+
+        DISPATCH();
+    }
+
+op_GETUPVAL: {
+        *ra = *frame->closure->upvals[rb_i]->val;
+        DISPATCH();
+    }
+
+op_SETUPVAL: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        *frame->closure->upvals[ra_i]->val = *rb;
+        DISPATCH();
+    }
+
+op_BNOT: {
+        do_simple_arithmetic_unary(~(int), ra, rb_i);
+        DISPATCH();
+    }
+
+op_RSHIFT: {
+        do_bitwise_arithmetic(>>, ra, rb_i, rc_i);
+        DISPATCH();
+    }
+
+op_LSHIFT: {
+        do_bitwise_arithmetic(<<, ra, rb_i, rc_i);
+        DISPATCH();
+    }
+
+op_BOR: {
+        do_bitwise_arithmetic(|, ra, rb_i, rc_i);
+        DISPATCH();
+    }
+
+op_BAND: {
+        do_bitwise_arithmetic(&, ra, rb_i, rc_i);
+        DISPATCH();
+    }
+
+op_BXOR: {
+        do_bitwise_arithmetic(^, ra, rb_i, rc_i);
+        DISPATCH();
+    }
+
+op_INC: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        if (rb->type != FH_VAL_FLOAT) {
+            vm_error(vm, "increment on non-numeric value");
+            goto user_err;
+        }
+        ra->type = FH_VAL_FLOAT;
+        ra->data.num = rb->data.num + 1.0;
+        DISPATCH();
+    }
+
+op_DEC: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        if (rb->type != FH_VAL_FLOAT) {
+            vm_error(vm, "decrement on non-numeric value");
+            goto user_err;
+        }
+        ra->type = FH_VAL_FLOAT;
+        ra->data.num = rb->data.num - 1.0;
+        DISPATCH();
+    }
+
+op_ADD: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+
+        if (rb->type == FH_VAL_FLOAT && rc->type == FH_VAL_FLOAT) {
+            ra->type = FH_VAL_FLOAT;
+            ra->data.num = rb->data.num + rc->data.num;
+            DISPATCH();
+        }
+
+        if (rb->type == FH_VAL_STRING) {
+            const char *s1 = GET_OBJ_STRING_DATA(rb->data.obj);
+
+            if (rc->type == FH_VAL_STRING) {
+                const char *s2 = GET_OBJ_STRING_DATA(rc->data.obj);
+
+                const size_t len = strlen(s1) + strlen(s2) + 1;
+                if (len <= FH_MAXSHORTLEN) {
+                    char concat[len];
+                    snprintf(concat, len, "%s%s", s1, s2);
+                    *ra = fh_new_string(vm->prog, concat);
+                    DISPATCH();
+                }
+
+                char *concat = malloc(len);
+                if (!concat) {
+                    vm_error_oom(vm);
+                    goto err;
+                }
+                snprintf(concat, len, "%s%s", s1, s2);
+                *ra = fh_new_string(vm->prog, concat);
+                free(concat);
+                DISPATCH();
+            }
+
+            if (rc->type == FH_VAL_FLOAT) {
+                int needed = snprintf(NULL, 0, "%s%g", s1, rc->data.num) + 1;
+                if (needed <= FH_MAXSHORTLEN) {
+                    char concate[needed];
+                    snprintf(concate, (size_t)needed, "%s%g", s1, rc->data.num);
+                    *ra = fh_new_string(vm->prog, concate);
+                    DISPATCH();
+                }
+
+                char *concate = malloc((size_t) needed);
+                if (!concate) {
+                    vm_error_oom(vm);
+                    goto err;
+                }
+                snprintf(concate, (size_t)needed, "%s%g", s1, rc->data.num);
+                *ra = fh_new_string(vm->prog, concate);
+                free(concate);
+                DISPATCH();
+            }
+        }
+
+        if (rc->type == FH_VAL_STRING) {
+            const char *s1 = GET_OBJ_STRING_DATA(rc->data.obj);
+
+            if (rb->type == FH_VAL_STRING) {
+                const char *s2 = GET_OBJ_STRING_DATA(rb->data.obj);
+
+                const size_t len = strlen(s1) + strlen(s2) + 1;
+                if (len <= FH_MAXSHORTLEN) {
+                    char concate[len];
+                    snprintf(concate, len, "%s%s", s1, s2);
+                    *ra = fh_new_string(vm->prog, concate);
+                    DISPATCH();
+                }
+
+                char *concate = malloc(len);
+                if (!concate) {
+                    vm_error_oom(vm);
+                    goto err;
+                }
+                snprintf(concate, len, "%s%s", s1, s2);
+                *ra = fh_new_string(vm->prog, concate);
+                free(concate);
+                DISPATCH();
+            }
+
+            if (rb->type == FH_VAL_FLOAT) {
+                int needed = snprintf(NULL, 0, "%g%s", rb->data.num, s1) + 1;
+                if (needed <= FH_MAXSHORTLEN) {
+                    char concate[needed];
+                    snprintf(concate, (size_t)needed, "%g%s", rb->data.num, s1);
+                    *ra = fh_new_string(vm->prog, concate);
+                    DISPATCH();
+                }
+
+                char *concate = malloc((size_t) needed);
+                if (!concate) {
+                    vm_error_oom(vm);
+                    goto err;
+                }
+                snprintf(concate, (size_t)needed, "%g%s", rb->data.num, s1);
+                *ra = fh_new_string(vm->prog, concate);
+                free(concate);
+                DISPATCH();
+            }
+        }
+
+        vm_error(vm, "can't add the two variables, type %s and type %s",
+                 fh_type_to_str(vm->prog, rb->type),
+                 fh_type_to_str(vm->prog, rc->type));
+        goto user_err;
+    }
+
+op_SUB: {
+        do_simple_arithmetic(-, ra, rb_i, rc_i);
+        DISPATCH();
+    }
+op_MUL: {
+        do_simple_arithmetic(*, ra, rb_i, rc_i);
+        DISPATCH();
+    }
+op_DIV: {
+        do_simple_arithmetic(/, ra, rb_i, rc_i);
+        DISPATCH();
+    }
+
+op_MOD: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        if (rb->type != FH_VAL_FLOAT || rc->type != FH_VAL_FLOAT) {
+            vm_error(vm, "arithmetic on non-numeric values");
+            goto user_err;
+        }
+        ra->type = FH_VAL_FLOAT;
+        ra->data.num = fmod(rb->data.num, rc->data.num);
+        DISPATCH();
+    }
+
+op_NEG: {
+        do_simple_arithmetic_unary(-, ra, rb_i);
+        DISPATCH();
+    }
+
+op_NOT: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        *ra = fh_new_bool(!fh_val_is_true(rb));
+        DISPATCH();
+    }
+
+op_CALL: {
+        // IMPORTANT: compute absolute ret_reg exactly like your original (ra - vm->stack)
+        // but we can avoid the pointer subtraction by: ret_reg = frame->base + ra_i
+        // because ra is &reg_base[ra_i] and reg_base == stack+frame->base
+        int ret_reg = frame->base + (int) ra_i;
+        const uint8_t t = ra->type;
+
+        if (t == FH_VAL_CLOSURE) {
+            struct fh_closure *cl = GET_OBJ_CLOSURE(ra->data.obj);
+            uint32_t *func_addr = cl->func_def->code;
+
+            struct fh_vm_call_frame *new_frame = prepare_call(vm, cl, ret_reg, (int) rb_i);
+            if (!new_frame) goto err;
+
+            new_frame->ret_addr = pc;
+            pc = func_addr;
+
+            // prepare_call may realloc vm->stack
+            stack = vm->stack;
+            goto rebind_frame;
+        }
+
+        if (t == FH_VAL_C_FUNC) {
+            struct fh_vm_call_frame *new_frame = prepare_c_call(vm, ret_reg, (int) rb_i);
+            if (!new_frame) goto err;
+
+            // stack may have moved
+            stack = vm->stack;
+
+            int r = ra->data.c_func(
+                vm->prog,
+                stack + new_frame->base - 1,
+                stack + new_frame->base,
+                (int) rb_i
+            );
+
+            call_frame_stack_pop(&vm->call_stack, NULL);
+            if (r < 0) goto user_err;
+
+            // still in same bytecode function after C call
+            goto rebind_frame;
+        }
+
+        vm_error(vm, "call to non-function value");
+        goto user_err;
+    }
+
+op_JMP: {
+        while (ra_i-- > 0) {
+            if (!vm->open_upvals) break;
+            close_upval(vm);
+        }
+        pc += rs;
+        DISPATCH();
+    }
+
+op_TEST: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        cmp_test = fh_val_is_true(rb) ^ (int) ra_i;
+        if (cmp_test) {
+            // skip next instruction
+            pc++;
+            DISPATCH();
+        }
+        // next instruction holds signed offset; your old code: pc += GET_INSTR_RS(*pc) + 1;
+        int32_t off = GET_INSTR_RS(*pc);
+        pc += off + 1;
+        DISPATCH();
+    }
+
+op_CMP_EQ: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        cmp_test = (fh_vals_are_equal(rb, rc) ^ (int) ra_i);
+        if (cmp_test) pc++;
+        DISPATCH();
+    }
+
+op_CMP_GT: {
+        cmp_test = 0;
+        do_test_arithmetic(>, &cmp_test, rb_i, rc_i);
+        if (cmp_test) pc++;
+        DISPATCH();
+    }
+
+op_CMP_GE: {
+        cmp_test = 0;
+        do_test_arithmetic(>=, &cmp_test, rb_i, rc_i);
+        if (cmp_test) pc++;
+        DISPATCH();
+    }
+
+op_CMP_LT: {
+        cmp_test = 0;
+        do_test_arithmetic(<, &cmp_test, rb_i, rc_i);
+        if (cmp_test) pc++;
+        DISPATCH();
+    }
+
+op_CMP_LE: {
+        cmp_test = 0;
+        do_test_arithmetic(<=, &cmp_test, rb_i, rc_i);
+        if (cmp_test) pc++;
+        DISPATCH();
+    }
+
+op_LEN: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        switch (rb->type) {
+            case FH_VAL_ARRAY:
+                ra->type = FH_VAL_FLOAT;
+                ra->data.num = GET_OBJ_ARRAY(rb->data.obj)->len;
+                break;
+            case FH_VAL_MAP:
+                ra->type = FH_VAL_FLOAT;
+                ra->data.num = GET_OBJ_MAP(rb->data.obj)->len;
+                break;
+            case FH_VAL_STRING:
+                ra->type = FH_VAL_FLOAT;
+                ra->data.num = GET_VAL_STRING(rb)->size - 1;
+                break;
+            default:
+                vm_error(vm, "len(): argument must be array/map/string");
+                goto user_err;
+        }
+        DISPATCH();
+    }
+
+op_APPEND: {
+        // append rA, rB(value), rC(array)
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i); // value
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i); // array
+
+        if (rc->type != FH_VAL_ARRAY) {
+            vm_error(vm, "append(): argument 1 must be array");
+            goto user_err;
+        }
+
+        struct fh_array *arr = GET_OBJ_ARRAY(rc->data.obj);
+
+        GC_PIN_OBJ(arr);
+        struct fh_value *slot = fh_grow_array_object_uninit(vm->prog, arr, 1);
+        GC_UNPIN_OBJ(arr);
+        if (!slot) goto err;
+
+        *slot = *rb;
+        *ra = *rc;
+        DISPATCH();
+    }
+
+    // If opcode missing in dispatch table
+op_UNHANDLED:
+    vm_error(vm, "unhandled opcode");
+    goto err;
+
+#undef DISPATCH
+#undef LOAD_REG
+#undef LOAD_CONST
+#undef LOAD_REG_OR_CONST
 
 err:
     fh_running = false;
@@ -966,6 +1105,734 @@ user_err:
     fh_running = false;
     vm->pc = pc;
     save_error_loc(vm);
-    //dump_state(vm);
     return -1;
 }
+
+// int fh_run_vm(struct fh_vm *vm) {
+//     struct fh_value *const_base;
+//     struct fh_value *reg_base;
+//
+//     uint32_t *pc = vm->pc;
+//     int cmp_test = 0;
+//     struct fh_vm_call_frame *frame = NULL;
+//
+// changed_stack_frame: {
+//         frame = call_frame_stack_top(&vm->call_stack);
+//         const_base = frame->closure->func_def->consts;
+//         reg_base = vm->stack + frame->base;
+//     }
+//     while (1) {
+//         //dump_regs(vm);
+//         //fh_dump_bc_instr(vm->prog, -1, *pc);
+//
+//         uint32_t instr = *pc++;
+//
+//         uint32_t op = GET_INSTR_OP(instr);
+//         uint32_t ra_i = GET_INSTR_RA(instr);
+//         uint32_t rb_i = GET_INSTR_RB(instr);
+//         uint32_t rc_i = GET_INSTR_RC(instr);
+//         struct fh_value *ra = &reg_base[ra_i];
+//
+//         // -------------------------
+//         // FAST PATH: OPC_GETEL
+//         // -------------------------
+//         if (__builtin_expect(op == OPC_GETEL, 0)) {
+//             struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+//             struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+//
+//             // array is the hot case in your benchmark
+//             if (__builtin_expect(rb->type == FH_VAL_ARRAY, 1)) {
+//                 uint32_t idx;
+//                 if (vm_assert_index_fast(vm, rc, &idx, "array") < 0)
+//                     goto user_err;
+//
+//                 const struct fh_array *arr = GET_OBJ_ARRAY(rb->data.obj);
+//                 if (idx < arr->len) *ra = arr->items[idx];
+//                 else ra->type = FH_VAL_NULL;
+//
+//                 continue;
+//             }
+//
+//             if (rb->type == FH_VAL_STRING) {
+//                 uint32_t idx;
+//                 if (vm_assert_index_fast(vm, rc, &idx, "string") < 0)
+//                     goto user_err;
+//
+//                 struct fh_string *s = GET_VAL_STRING(rb);
+//                 if (idx >= s->size - 1) {
+//                     *ra = fh_new_null();
+//                 } else {
+//                     unsigned char ch = (unsigned char) GET_OBJ_STRING_DATA(s)[idx];
+//                     *ra = vm->char_cache[ch];
+//                 }
+//                 continue;
+//             }
+//
+//             if (rb->type == FH_VAL_MAP) {
+//                 if (fh_get_map_value(rb, rc, ra) < 0) {
+//                     *ra = fh_new_null();
+//                 }
+//                 continue;
+//             }
+//
+//             vm_error(vm, "invalid element access (non-container object)");
+//             goto user_err;
+//         }
+//
+//         // -------------------------
+//         // FAST PATH: OPC_CALL
+//         // -------------------------
+//         if (__builtin_expect(op == OPC_CALL, 0)) {
+//             // absolut slot R[A] = frame->base + ra_i
+//             const int ret_reg = frame->base + (int) ra_i;
+//             struct fh_value *funcv = &reg_base[ra_i];
+//             const uint8_t t = funcv->type;
+//
+//             if (t == FH_VAL_CLOSURE) {
+//                 struct fh_closure *cl = GET_OBJ_CLOSURE(funcv->data.obj);
+//                 uint32_t *func_addr = cl->func_def->code;
+//
+//                 // prepare_call can realloc vm->stack; don't use reg_base/ra after it
+//                 struct fh_vm_call_frame *new_frame = prepare_call(vm, cl, ret_reg, (int) rb_i);
+//                 if (!new_frame) goto err;
+//
+//                 new_frame->ret_addr = pc;
+//                 pc = func_addr;
+//                 goto changed_stack_frame;
+//             }
+//
+//             if (t == FH_VAL_C_FUNC) {
+//                 struct fh_vm_call_frame *new_frame = prepare_c_call(vm, ret_reg, (int) rb_i);
+//                 if (!new_frame) goto err;
+//
+//                 int r = funcv->data.c_func(
+//                     vm->prog,
+//                     vm->stack + new_frame->base - 1,
+//                     vm->stack + new_frame->base,
+//                     (int) rb_i
+//                 );
+//
+//                 call_frame_stack_pop(&vm->call_stack, NULL);
+//                 if (r < 0) goto user_err;
+//
+//                 // rebind current frame after pop; still executing same bytecode function
+//                 frame = call_frame_stack_top(&vm->call_stack);
+//                 if (!frame || !frame->closure) {
+//                     vm->pc = pc;
+//                     return 0;
+//                 }
+//                 const_base = frame->closure->func_def->consts;
+//                 reg_base = vm->stack + frame->base;
+//
+//                 continue; // IMPORTANT: opcode handled
+//             }
+//
+//             vm_error(vm, "call to non-function value");
+//             goto user_err;
+//         }
+//
+//         // -------------------------
+//         // FAST PATH: OPC_ADD
+//         // -------------------------
+//         if (__builtin_expect(op == OPC_ADD, 0)) {
+//             struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+//             struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+//
+//             if (rb->type == FH_VAL_FLOAT && rc->type == FH_VAL_FLOAT) {
+//                 ra->type = FH_VAL_FLOAT;
+//                 ra->data.num = rb->data.num + rc->data.num;
+//                 continue;
+//             }
+//
+//             if (rb->type == FH_VAL_STRING) {
+//                 const char *s1 = GET_OBJ_STRING_DATA(rb->data.obj);
+//
+//                 if (rc->type == FH_VAL_STRING) {
+//                     const char *s2 = GET_OBJ_STRING_DATA(rc->data.obj);
+//                     const size_t len = strlen(s1) + strlen(s2) + 1;
+//
+//                     if (len <= FH_MAXSHORTLEN) {
+//                         char concat[len];
+//                         snprintf(concat, len, "%s%s", s1, s2);
+//                         *ra = fh_new_string(vm->prog, concat);
+//                         continue;
+//                     }
+//
+//                     char *concat = malloc(len);
+//                     if (!concat) {
+//                         vm_error_oom(vm);
+//                         goto err;
+//                     }
+//                     snprintf(concat, len, "%s%s", s1, s2);
+//
+//                     *ra = fh_new_string(vm->prog, concat);
+//                     free(concat);
+//                     continue;
+//                 }
+//
+//                 if (rc->type == FH_VAL_FLOAT) {
+//                     int needed = snprintf(NULL, 0, "%s%g", s1, rc->data.num) + 1;
+//
+//                     if (needed <= FH_MAXSHORTLEN) {
+//                         char buf[needed];
+//                         snprintf(buf, needed, "%s%g", s1, rc->data.num);
+//                         *ra = fh_new_string(vm->prog, buf);
+//                         continue;
+//                     }
+//
+//                     char *buf = malloc((size_t) needed);
+//                     if (!buf) {
+//                         vm_error_oom(vm);
+//                         goto err;
+//                     }
+//                     snprintf(buf, (size_t)needed, "%s%g", s1, rc->data.num);
+//
+//                     *ra = fh_new_string(vm->prog, buf);
+//                     free(buf);
+//                     continue;
+//                 }
+//             }
+//
+//             if (rc->type == FH_VAL_STRING) {
+//                 const char *s1 = GET_OBJ_STRING_DATA(rc->data.obj);
+//
+//                 if (rb->type == FH_VAL_STRING) {
+//                     const char *s2 = GET_OBJ_STRING_DATA(rb->data.obj);
+//                     const size_t len = strlen(s1) + strlen(s2) + 1;
+//
+//                     if (len <= FH_MAXSHORTLEN) {
+//                         char concat[len];
+//                         snprintf(concat, len, "%s%s", s2, s1);
+//                         *ra = fh_new_string(vm->prog, concat);
+//                         continue;
+//                     }
+//
+//                     char *concat = malloc(len);
+//                     if (!concat) {
+//                         vm_error_oom(vm);
+//                         goto err;
+//                     }
+//                     snprintf(concat, len, "%s%s", s2, s1);
+//
+//                     *ra = fh_new_string(vm->prog, concat);
+//                     free(concat);
+//                     continue;
+//                 }
+//
+//                 if (rb->type == FH_VAL_FLOAT) {
+//                     int needed = snprintf(NULL, 0, "%g%s", rb->data.num, s1) + 1;
+//
+//                     if (needed <= FH_MAXSHORTLEN) {
+//                         char buf[needed];
+//                         snprintf(buf, needed, "%g%s", rb->data.num, s1);
+//                         *ra = fh_new_string(vm->prog, buf);
+//                         continue;
+//                     }
+//
+//                     char *buf = malloc((size_t) needed);
+//                     if (!buf) {
+//                         vm_error_oom(vm);
+//                         goto err;
+//                     }
+//                     snprintf(buf, (size_t)needed, "%g%s", rb->data.num, s1);
+//
+//                     *ra = fh_new_string(vm->prog, buf);
+//                     free(buf);
+//                     continue;
+//                 }
+//             }
+//
+//             vm_error(vm, "can't add the two variables, type %s and type %s",
+//                      fh_type_to_str(vm->prog, rb->type),
+//                      fh_type_to_str(vm->prog, rc->type));
+//             goto user_err;
+//         }
+//
+//         // -------------------------
+//         // NORMAL DISPATCH
+//         // -------------------------
+//         switch (op) {
+//             handle_op(OPC_LDC) {
+//                 *ra = const_base[GET_INSTR_RU(instr)];
+//                 break;
+//             }
+//
+//             handle_op(OPC_LDNULL) {
+//                 ra->type = FH_VAL_NULL;
+//                 break;
+//             }
+//
+//             handle_op(OPC_MOV) {
+//                 *ra = *LOAD_REG_OR_CONST(rb_i);
+//                 break;
+//             }
+//
+//             handle_op(OPC_RET) {
+//                 if (ra_i)
+//                     vm->stack[frame->base - 1] = *LOAD_REG_OR_CONST(rb_i);
+//                 else
+//                     vm->stack[frame->base - 1].type = FH_VAL_NULL;
+//
+//                 // close function upvalues (only those belonging to this frame)
+//                 struct fh_value *frame_start = vm->stack + frame->base;
+//                 struct fh_value *frame_end = vm->stack + frame->stack_top;
+//
+//                 while (vm->open_upvals != NULL) {
+//                     struct fh_value *p = vm->open_upvals->val;
+//
+//                     // if already closed, p won't point into vm->stack; stop because list is ordered by stack slots
+//                     if (p < frame_start || p >= frame_end)
+//                         break;
+//
+//                     close_upval(vm);
+//                 }
+//
+//                 uint32_t *ret_addr = frame->ret_addr;
+//                 call_frame_stack_pop(&vm->call_stack, NULL);
+//                 if (!ret_addr) {
+//                     vm->pc = pc;
+//                     return 0;
+//                 }
+//
+//                 frame = call_frame_stack_top(&vm->call_stack);
+//                 if (!frame || !frame->closure) {
+//                     vm->pc = pc;
+//                     return 0;
+//                 }
+//
+//                 pc = ret_addr;
+//                 goto changed_stack_frame;
+//             }
+//
+//                 // handle_op(OPC_GETEL) {
+//                 //     struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+//                 //     struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+//                 //
+//                 //     switch (rb->type) {
+//                 //         case FH_VAL_ARRAY: {
+//                 //             uint32_t idx;
+//                 //             if (vm_assert_index_fast(vm, rc, &idx, "array") < 0)
+//                 //                 goto user_err;
+//                 //
+//                 //             const struct fh_array *arr = GET_OBJ_ARRAY(rb->data.obj);
+//                 //             if (idx < arr->len) *ra = arr->items[idx];
+//                 //             else ra->type = FH_VAL_NULL;
+//                 //             break;
+//                 //         }
+//                 //         case FH_VAL_MAP: {
+//                 //             const double d = rc->data.num;
+//                 //
+//                 //             if (!(d >= 0.0 && d < 4294967296.0)) {
+//                 //                 vm_error(vm, "invalid %d access (index out of range)", d);
+//                 //                 return -1;
+//                 //             }
+//                 //
+//                 //             if (fh_get_map_value(rb, rc, ra) < 0) {
+//                 //                 *ra = fh_new_null();
+//                 //             }
+//                 //             break;
+//                 //         }
+//                 //         case FH_VAL_STRING: {
+//                 //             uint32_t idx;
+//                 //             if (vm_assert_index_fast(vm, rc, &idx, "string") < 0)
+//                 //                 goto user_err;
+//                 //
+//                 //             struct fh_string *s = GET_VAL_STRING(rb);
+//                 //             if (idx >= s->size - 1) {
+//                 //                 *ra = fh_new_null();
+//                 //                 break;
+//                 //             }
+//                 //
+//                 //             unsigned char ch = (unsigned char) GET_OBJ_STRING_DATA(s)[idx];
+//                 //             *ra = vm->char_cache[ch];
+//                 //             break;
+//                 //         }
+//                 //         default:
+//                 //             vm_error(vm, "invalid element access (non-container object)");
+//                 //             goto user_err;
+//                 //     }
+//                 //     break;
+//                 // }
+//
+//             handle_op(OPC_SETEL) {
+//                 struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+//                 struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+//                 if (ra->type == FH_VAL_ARRAY) {
+//                     uint32_t idx;
+//                     if (vm_assert_index(vm, rb, &idx, "array") < 0)
+//                         goto user_err;
+//
+//                     struct fh_array *arr = GET_OBJ_ARRAY(ra->data.obj);
+//
+//                     if (idx < arr->len) {
+//                         arr->items[idx] = *rc;
+//                     } else {
+//                         vm_error(vm, "array index out of bounds");
+//                         goto user_err;
+//                     }
+//
+//                     break;
+//                 }
+//                 if (ra->type == FH_VAL_MAP) {
+//                     if (fh_add_map_entry(vm->prog, ra, rb, rc) < 0)
+//                         goto err;
+//                     break;
+//                 }
+//                 vm_error(vm, "invalid element access (non-container object)");
+//                 goto user_err;
+//             }
+//
+//             handle_op(OPC_NEWARRAY) {
+//                 int n_elems = GET_INSTR_RU(instr);
+//
+//                 struct fh_array *arr = fh_make_array(vm->prog, false);
+//                 if (!arr)
+//                     goto err;
+//
+//                 if (n_elems != 0) {
+//                     GC_PIN_OBJ(arr);
+//                     // struct fh_value *first = fh_grow_array_object(vm->prog, arr, n_elems);
+//                     struct fh_value *first = fh_grow_array_object_uninit(vm->prog, arr, n_elems);
+//                     if (!first) {
+//                         GC_UNPIN_OBJ(arr);
+//                         goto err;
+//                     }
+//                     GC_UNPIN_OBJ(arr);
+//                     memcpy(first, ra + 1, n_elems*sizeof(struct fh_value));
+//                 } else {
+//                     fh_reserve_array_capacity(vm->prog, arr, 128);
+//                 }
+//                 ra->type = FH_VAL_ARRAY;
+//                 ra->data.obj = arr;
+//                 break;
+//             }
+//
+//             handle_op(OPC_NEWMAP) {
+//                 int n_elems = GET_INSTR_RU(instr);
+//                 int n_elems_half = n_elems >> 1;
+//
+//                 struct fh_map *map = fh_make_map(vm->prog, false);
+//                 if (!map || fh_alloc_map_object_len(map, n_elems) < 0)
+//                     goto err;
+//
+//                 if (n_elems != 0) {
+//                     GC_PIN_OBJ(map);
+//                     for (int i = 0; i < n_elems_half; i++) {
+//                         int ni = i << 1;
+//                         struct fh_value *key = &ra[ni + 1];
+//                         struct fh_value *val = &ra[ni + 2];
+//                         if (fh_add_map_object_entry(vm->prog, map, key, val) < 0) {
+//                             GC_UNPIN_OBJ(map);
+//                             goto err;
+//                         }
+//                     }
+//                     GC_UNPIN_OBJ(map);
+//                 }
+//                 ra->type = FH_VAL_MAP;
+//                 ra->data.obj = map;
+//                 break;
+//             }
+//
+//             handle_op(OPC_CLOSURE) {
+//                 struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+//                 if (rb->type != FH_VAL_FUNC_DEF) {
+//                     vm_error(vm, "invalid value for closure (not a func_def)");
+//                     goto err;
+//                 }
+//                 struct fh_func_def *func_def = GET_VAL_FUNC_DEF(rb);
+//                 struct fh_closure *c = fh_make_closure(vm->prog, false, func_def);
+//                 if (!c)
+//                     goto err;
+//                 GC_PIN_OBJ(c);
+//                 // struct fh_vm_call_frame *frame = NULL;
+//                 for (int i = 0; i < func_def->n_upvals; i++) {
+//                     if (func_def->upvals[i].type == FH_UPVAL_TYPE_UPVAL) {
+//                         // if (frame == NULL)
+//                         // frame = call_frame_stack_top(&vm->call_stack);
+//                         c->upvals[i] = frame->closure->upvals[func_def->upvals[i].num];
+//                     } else {
+//                         c->upvals[i] = find_or_add_upval(vm, &reg_base[func_def->upvals[i].num]);
+//                         GC_PIN_OBJ(c->upvals[i]);
+//                     }
+//                 }
+//                 ra->type = FH_VAL_CLOSURE;
+//                 ra->data.obj = c;
+//                 for (int i = 0; i < func_def->n_upvals; i++)
+//                     GC_UNPIN_OBJ(c->upvals[i]);
+//                 GC_UNPIN_OBJ(c);
+//                 break;
+//             }
+//
+//             handle_op(OPC_GETUPVAL) {
+//                 //TODO am scos? struct fh_vm_call_frame *frame = call_frame_stack_top(&vm->call_stack);
+//                 *ra = *frame->closure->upvals[rb_i]->val;
+//                 break;
+//             }
+//
+//             handle_op(OPC_SETUPVAL) {
+//                 struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+//                 //TODO am scos? struct fh_vm_call_frame *frame = call_frame_stack_top(&vm->call_stack);
+//                 *frame->closure->upvals[ra_i]->val = *rb;
+//                 break;
+//             }
+//
+//             handle_op(OPC_BNOT) {
+//                 do_simple_arithmetic_unary(~(int), ra, rb_i);
+//                 break;
+//             }
+//
+//             handle_op(OPC_RSHIFT) {
+//                 do_bitwise_arithmetic(>>, ra, rb_i, rc_i);
+//                 break;
+//             }
+//
+//             handle_op(OPC_LSHIFT) {
+//                 do_bitwise_arithmetic(<<, ra, rb_i, rc_i);
+//                 break;
+//             }
+//
+//             handle_op(OPC_BOR) {
+//                 do_bitwise_arithmetic(|, ra, rb_i, rc_i);
+//                 break;
+//             }
+//
+//             handle_op(OPC_BAND) {
+//                 do_bitwise_arithmetic(&, ra, rb_i, rc_i);
+//                 break;
+//             }
+//
+//             handle_op(OPC_BXOR) {
+//                 do_bitwise_arithmetic(^, ra, rb_i, rc_i);
+//                 break;
+//             }
+//
+//             handle_op(OPC_INC) {
+//                 struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+//                 if (rb->type != FH_VAL_FLOAT) {
+//                     vm_error(vm, "increment on non-numeric value");
+//                     goto user_err;
+//                 }
+//                 ra->type = FH_VAL_FLOAT;
+//                 ra->data.num = rb->data.num + 1.0;
+//                 break;
+//             }
+//
+//             handle_op(OPC_DEC) {
+//                 struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+//                 if (rb->type != FH_VAL_FLOAT) {
+//                     vm_error(vm, "decrement on non-numeric value");
+//                     goto user_err;
+//                 }
+//                 ra->type = FH_VAL_FLOAT;
+//                 ra->data.num = rb->data.num - 1.0;
+//                 break;
+//             }
+//                 // handle_op(OPC_ADD) {
+//                 //
+//                 // }
+//
+//             handle_op(OPC_SUB) {
+//                 do_simple_arithmetic(-, ra, rb_i, rc_i);
+//                 break;
+//             }
+//
+//             handle_op(OPC_MUL) {
+//                 do_simple_arithmetic(*, ra, rb_i, rc_i);
+//                 break;
+//             }
+//
+//             handle_op(OPC_DIV) {
+//                 do_simple_arithmetic(/, ra, rb_i, rc_i);
+//                 break;
+//             }
+//
+//             handle_op(OPC_MOD) {
+//                 struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+//                 struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+//                 if (rb->type != FH_VAL_FLOAT || rc->type != FH_VAL_FLOAT) {
+//                     vm_error(vm, "arithmetic on non-numeric values");
+//                     goto user_err;
+//                 }
+//                 ra->type = FH_VAL_FLOAT;
+//                 ra->data.num = fmod(rb->data.num, rc->data.num);
+//                 break;
+//             }
+//
+//             handle_op(OPC_NEG) {
+//                 do_simple_arithmetic_unary(-, ra, rb_i);
+//                 break;
+//             }
+//
+//             handle_op(OPC_NOT) {
+//                 struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+//                 *ra = fh_new_bool(! fh_val_is_true(rb));
+//                 break;
+//             }
+//
+//                 // handle_op(OPC_CALL) {
+//                 //     //dump_regs(vm);
+//                 //     int ret_reg = (int) (ra - vm->stack); // <- slot absolut (R[A])
+//                 //     const uint8_t t = ra->type;
+//                 //
+//                 //     if (t == FH_VAL_CLOSURE) {
+//                 //         struct fh_closure *cl = GET_OBJ_CLOSURE(ra->data.obj);
+//                 //         uint32_t *func_addr = cl->func_def->code;
+//                 //         /*
+//                 //          * WARNING: prepare_call() may move the stack, so don't trust reg_base
+//                 //          * or ra after calling it -- jumping to changed_stack_frame fixes it.
+//                 //          */
+//                 //         struct fh_vm_call_frame *new_frame = prepare_call(vm, cl, ret_reg, rb_i);
+//                 //         if (!new_frame) goto err;
+//                 //
+//                 //         new_frame->ret_addr = pc;
+//                 //         pc = func_addr;
+//                 //         goto changed_stack_frame;
+//                 //     }
+//                 //     if (t == FH_VAL_C_FUNC) {
+//                 //         struct fh_vm_call_frame *new_frame = prepare_c_call(vm, ret_reg, rb_i);
+//                 //         if (!new_frame) goto err;
+//                 //
+//                 //         int r = ra->data.c_func(vm->prog, vm->stack + new_frame->base - 1, vm->stack + new_frame->base,
+//                 //                                 rb_i);
+//                 //
+//                 //         call_frame_stack_pop(&vm->call_stack, NULL);
+//                 //         if (r < 0) goto user_err;
+//                 //         // still in same bytecode function after C call
+//                 //         frame = call_frame_stack_top(&vm->call_stack);
+//                 //         const_base = frame->closure->func_def->consts;
+//                 //         reg_base = vm->stack + frame->base;
+//                 //         break;
+//                 //     }
+//                 //     vm_error(vm, "call to non-function value");
+//                 //     goto user_err;
+//                 // }
+//
+//             handle_op(OPC_JMP) {
+//                 while (ra_i-- > 0) {
+//                     if (!vm->open_upvals) break;
+//                     close_upval(vm);
+//                 }
+//                 pc += GET_INSTR_RS(instr);
+//                 break;
+//             }
+//
+//             handle_op(OPC_TEST) {
+//                 struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+//                 cmp_test = fh_val_is_true(rb) ^ ra_i;
+//                 if (cmp_test) {
+//                     pc++;
+//                     break;
+//                 }
+//                 pc += GET_INSTR_RS(*pc) + 1;
+//                 break;
+//             }
+//
+//             handle_op(OPC_CMP_EQ) {
+//                 struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+//                 struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+//                 cmp_test = fh_vals_are_equal(rb, rc) ^ ra_i;
+//                 if (cmp_test)
+//                     pc++;
+//                 break;
+//             }
+//
+//             handle_op(OPC_CMP_GT) {
+//                 cmp_test = 0;
+//                 do_test_arithmetic(>, &cmp_test, rb_i, rc_i);
+//                 if (cmp_test)
+//                     pc++;
+//                 break;
+//             }
+//
+//             handle_op(OPC_CMP_GE) {
+//                 cmp_test = 0;
+//                 do_test_arithmetic(>=, &cmp_test, rb_i, rc_i);
+//                 if (cmp_test)
+//                     pc++;
+//                 break;
+//             }
+//
+//             handle_op(OPC_CMP_LT) {
+//                 cmp_test = 0;
+//                 do_test_arithmetic(<, &cmp_test, rb_i, rc_i);
+//                 if (cmp_test)
+//                     pc++;
+//                 break;
+//             }
+//
+//             handle_op(OPC_CMP_LE) {
+//                 cmp_test = 0;
+//                 do_test_arithmetic(<=, &cmp_test, rb_i, rc_i);
+//                 if (cmp_test)
+//                     pc++;
+//                 break;
+//             }
+//
+//             handle_op(OPC_LEN) {
+//                 struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+//                 switch (rb->type) {
+//                     case FH_VAL_ARRAY: {
+//                         ra->type = FH_VAL_FLOAT;
+//                         ra->data.num = GET_OBJ_ARRAY(rb->data.obj)->len;
+//                         break;
+//                     }
+//                     case FH_VAL_MAP: {
+//                         ra->type = FH_VAL_FLOAT;
+//                         ra->data.num = GET_OBJ_MAP(rb->data.obj)->len;
+//                         break;
+//                     }
+//                     case FH_VAL_STRING: {
+//                         ra->type = FH_VAL_FLOAT;
+//                         ra->data.num = GET_VAL_STRING(rb)->size - 1;
+//                         break;
+//                     }
+//                     default: {
+//                         vm_error(vm, "len(): argument must be array/map/string");
+//                         goto user_err;
+//                     }
+//                 }
+//                 break;
+//             }
+//
+//             handle_op(OPC_APPEND) {
+//                 //append rA, rB(value), rC(array)
+//                 struct fh_value *rb = LOAD_REG_OR_CONST(rb_i); // value
+//                 struct fh_value *rc = LOAD_REG_OR_CONST(rc_i); // array
+//
+//                 if (rc->type != FH_VAL_ARRAY) {
+//                     vm_error(vm, "append(): argument 1 must be array");
+//                     goto user_err;
+//                 }
+//
+//                 struct fh_array *arr = GET_OBJ_ARRAY(rc->data.obj);
+//
+//                 GC_PIN_OBJ(arr);
+//                 struct fh_value *slot = fh_grow_array_object_uninit(vm->prog, arr, 1);
+//                 GC_UNPIN_OBJ(arr);
+//                 if (!slot) goto err;
+//
+//                 *slot = *rb;
+//                 *ra = *rc;
+//                 break;
+//             }
+//
+//             default:
+//                 vm_error(vm, "unhandled opcode");
+//                 goto err;
+//         }
+//     }
+//
+// err:
+//     fh_running = false;
+//     vm->pc = pc;
+//     save_error_loc(vm);
+//     dump_state(vm);
+//     return -1;
+//
+// user_err:
+//     fh_running = false;
+//     vm->pc = pc;
+//     save_error_loc(vm);
+//     //dump_state(vm);
+//     return -1;
+// }

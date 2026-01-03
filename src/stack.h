@@ -87,11 +87,19 @@ static inline int name##_pop(struct name *n, type *item) {            \
 static inline void name##_init_cap(struct name *n, int cap_items) {     \
 fh_init_stack_cap(&n->s, cap_items, sizeof(type));                  \
 }                                                                      \
+static inline type *name##_push_uninit(struct name *n) { \
+if (n->s.num + 1 > n->s.cap && fh_stack_ensure_cap(&n->s, 1, sizeof(type)) < 0) \
+return NULL; \
+type *dest = (type*)n->s.data + n->s.num; \
+n->s.num++; \
+return dest; \
+} \
 static inline type *name##_push(struct name *n, type *item) {         \
     if (n->s.num + 1 > n->s.cap && fh_stack_ensure_cap(&n->s, 1, sizeof(type)) < 0)                \
     return NULL;                                                      \
     type *dest = (type*)n->s.data + n->s.num;                           \
-    if (item) *dest = *item; else memset(dest, 0, sizeof(type));        \
+    if (item) *dest = *item;                                            \
+    else memset(dest, 0, sizeof(type));                                   \
     n->s.num++;                                                         \
     return dest;                                                        \
 }                                                                     \

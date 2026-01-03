@@ -705,7 +705,7 @@ static int compile_load_lvalue_to_reg(struct fh_compiler *c, struct fh_p_expr *l
             container_rk = tmp;
         }
 
-        int index_rk = compile_expr(c, lv->data.index.index);
+        const int index_rk = compile_expr(c, lv->data.index.index);
         if (index_rk < 0) return -1;
 
         return add_instr(c, loc, MAKE_INSTR_ABC(OPC_GETEL, dst_reg, container_rk, index_rk));
@@ -892,7 +892,7 @@ static int compile_bin_op(struct fh_compiler *c, struct fh_src_loc loc, struct f
             int index_rk = compile_expr(c, expr->left->data.index.index);
             if (index_rk < 0)
                 return -1;
-            int val_rk = compile_expr(c, expr->right);
+            const int val_rk = compile_expr(c, expr->right);
             if (val_rk < 0)
                 return -1;
 
@@ -1280,7 +1280,7 @@ static int compile_expr_to_reg(struct fh_compiler *c, struct fh_p_expr *expr, in
         default: break;
     }
 
-    int tmp_rk = compile_expr(c, expr);
+    const int tmp_rk = compile_expr(c, expr);
     if (tmp_rk < 0)
         return -1;
     if (tmp_rk <= MAX_FUNC_REGS) {
@@ -1384,7 +1384,7 @@ static int compile_test(struct fh_compiler *c, struct fh_p_expr *test, bool inve
     return 0;
 }
 
-static int compile_if(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_stmt_if *stmt_if) {
+static int compile_if(struct fh_compiler *c, const struct fh_src_loc loc, const struct fh_p_stmt_if *stmt_if) {
     if (compile_test(c, stmt_if->test, false) < 0)
         return -1;
     free_tmp_regs(c, loc);
@@ -1399,7 +1399,7 @@ static int compile_if(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_
         return -1;
 
     /* If the true statement has been executed jump to end of if*/
-    int addr_jmp_if_end = get_cur_pc(c, loc);
+    const int addr_jmp_if_end = get_cur_pc(c, loc);
     if (add_instr(c, loc, MAKE_INSTR_AS(OPC_JMP, 0, 0)) < 0)
         return -1;
 
