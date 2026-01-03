@@ -9,11 +9,11 @@ fn make_tilemap(w, h, seed_ref) {
         append(tiles, t);
     }
     let m = {
-        #"w":w,
-        #"h":h,
+       # "w":w,
+       # "h":h,
         #"tiles": tiles
     };
-    m["w"]=w; m["h"]=h; m["tiles"]=tiles;
+   m["w"]=w; m["h"]=h; m["tiles"]=tiles;
     return m;
 }
 
@@ -77,7 +77,8 @@ fn bench(frames, entities, spawnPerFrame) {
             vy = vy + 18.0*dt;
 
             if (ai) {
-                let dir=-1; if (vx>=0) dir=1;
+                let dir=-1; 
+                if (vx>=0) dir=1;
                 let aheadX=i32(x+dir);
                 let footY=i32(y+1.0);
                 if (tile_at(tiles,w,h,aheadX,footY)==0) vx = -vx;
@@ -112,7 +113,7 @@ fn bench(frames, entities, spawnPerFrame) {
             k=k+1;
         }
 
-        f=f+1;
+        f++;
     }
 
     printf("%f\n", checksum);

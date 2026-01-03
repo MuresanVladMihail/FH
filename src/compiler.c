@@ -1185,7 +1185,7 @@ static int compile_inner_func_to_reg(struct fh_compiler *c, struct fh_src_loc lo
 }
 
 static int compile_inner_func(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_expr_func *expr) {
-    int dest_reg = alloc_reg(c, loc, TMP_VARIABLE);
+    const int dest_reg = alloc_reg(c, loc, TMP_VARIABLE);
     if (dest_reg < 0)
         return -1;
     return compile_inner_func_to_reg(c, loc, expr, dest_reg);

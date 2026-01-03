@@ -11,6 +11,10 @@
 #include "bytecode.h"
 #include "value.h"
 
+#ifndef FH_MAXSHORTLEN
+#define FH_MAXSHORTLEN 40
+#endif
+
 void fh_init_vm(struct fh_vm *vm, struct fh_program *prog) {
     vm->prog = prog;
     vm->stack = NULL;
@@ -471,8 +475,7 @@ changed_stack_frame: {
                             goto user_err;
 
                         struct fh_string *s = GET_VAL_STRING(rb);
-                        uint32_t len = s->size ? (s->size - 1) : 0;
-                        if (idx >= len) {
+                        if (idx >= s->size - 1) {
                             *ra = fh_new_null();
                             break;
                         }
@@ -675,6 +678,12 @@ changed_stack_frame: {
                         const char *s2 = GET_OBJ_STRING_DATA(rc->data.obj);
 
                         const size_t len = strlen(s1) + strlen(s2) + 1;
+                        if (len <= FH_MAXSHORTLEN) {
+                            char concat[FH_MAXSHORTLEN];
+                            snprintf(concat, len, "%s%s", s1, s2);
+                            *ra = fh_new_string(vm->prog, concat);
+                            break;
+                        }
                         char *concat = malloc(len);
                         if (!concat) {
                             vm_error(vm, "out of memory");
@@ -694,13 +703,20 @@ changed_stack_frame: {
                             goto err;
                         }
 
-                        char *concate = malloc((size_t) needed + 1);
+                        size_t size = (size_t) needed + 1;
+                        if (size <= FH_MAXSHORTLEN) {
+                            char concate[FH_MAXSHORTLEN];
+                            snprintf(concate, size, "%s%g", s1, rc->data.num);
+                            *ra = fh_new_string(vm->prog, concate);
+                            break;
+                        }
+                        char *concate = malloc(size);
                         if (!concate) {
                             vm_error(vm, "out of memory");
                             goto err;
                         }
 
-                        snprintf(concate, (size_t)needed + 1, "%s%g", s1, rc->data.num);
+                        snprintf(concate, size, "%s%g", s1, rc->data.num);
 
                         *ra = fh_new_string(vm->prog, concate);
                         free(concate);
@@ -776,7 +792,7 @@ changed_stack_frame: {
             }
 
             handle_op(OPC_NEG) {
-                do_simple_arithmetic_unary(-, ra, instr);
+                do_simple_arithmetic_unary(-, ra, rb_i);
                 break;
             }
 

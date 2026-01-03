@@ -31,7 +31,7 @@ CHECK_SCRIPT = tests/test.fh
 
 # Possible inputs: debug, debug2, release and asan.
 # Note: leave no spaces behind or after the equal sign below
-TARGETS =release
+TARGETS =debug
 
 #-Wundef: undefined macro variables used in #if.
 #-Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations: make sure that functions are prototyped properly.
