@@ -37,5 +37,5 @@ fn main() {
     let arr = [0];
     assert(arr[0]++ + ++arr[0], 2);
 
-    println("ok\n");
+    println("ok");
 }

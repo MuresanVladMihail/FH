@@ -43,7 +43,8 @@ static int vm_error_oom(struct fh_vm *vm) {
 static int ensure_stack_size(struct fh_vm *vm, size_t size) {
     if (vm->stack_size >= size)
         return 0;
-    const size_t new_size = (size + 1024 + 1) / 1024 * 1024;
+    const size_t new_size = (size + 1023u) & ~(size_t) 1023u;
+
     void *new_stack = realloc(vm->stack, new_size * sizeof(struct fh_value));
     if (!new_stack)
         return vm_error_oom(vm);
@@ -174,7 +175,7 @@ bool fh_val_is_true(struct fh_value *val) {
             return false;
         case FH_VAL_BOOL: return val->data.b;
         case FH_VAL_FLOAT: return val->data.num != 0.0;
-        case FH_VAL_STRING: return GET_VAL_STRING_DATA(val)[0] != '\0';
+        case FH_VAL_STRING: return GET_VAL_STRING(val)->size > 1;
     }
     return false;
 }
@@ -201,9 +202,11 @@ bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
         case FH_VAL_FUNC_DEF:
             return v1->data.obj == v2->data.obj;
 
-        case FH_VAL_STRING:
+        case FH_VAL_STRING: {
             struct fh_string *s1 = GET_VAL_STRING(v1);
             struct fh_string *s2 = GET_VAL_STRING(v2);
+
+            if (v1->data.obj == v2->data.obj) return true;
 
             if ((s1->hash != s2->hash) || (s1->size != s2->size))
                 return false;
@@ -212,6 +215,7 @@ bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
             const char *p2 = GET_OBJ_STRING_DATA(v2->data.obj);
 
             return memcmp(p1, p2, (size_t) s1->size) == 0;
+        }
     }
     return false;
 }
@@ -223,15 +227,13 @@ static inline int vm_assert_index(struct fh_vm *vm, const struct fh_value *idx_v
         return -1;
     }
 
-    double d = idx_val->data.num;
+    const double d = idx_val->data.num;
 
-    // fast reject
-    if (!(d >= 0.0) || !isfinite(d) || d > 4294967295.0) {
+    if (!(d >= 0.0 && d < 4294967296.0)) {
         vm_error(vm, "invalid %s access (index out of range)", what);
         return -1;
     }
 
-    // require integer index
     const uint32_t u = (uint32_t) d;
     if ((double) u != d) {
         vm_error(vm, "invalid %s access (non-integer index)", what);
@@ -288,7 +290,7 @@ static void dump_state(struct fh_vm *vm) {
 }
 
 static void save_error_loc(struct fh_vm *vm) {
-    int n = call_frame_stack_size(&vm->call_stack);
+    const int n = call_frame_stack_size(&vm->call_stack);
 
     for (int i = n - 1; i >= 0; --i) {
         struct fh_vm_call_frame *frame = call_frame_stack_item(&vm->call_stack, i);
@@ -377,8 +379,12 @@ changed_stack_frame: {
         //fh_dump_bc_instr(vm->prog, -1, *pc);
 
         uint32_t instr = *pc++;
-        struct fh_value *ra = &reg_base[GET_INSTR_RA(instr)];
-        switch (GET_INSTR_OP(instr)) {
+        uint32_t ra_i = GET_INSTR_RA(instr);
+        uint32_t op = GET_INSTR_OP(instr);
+        uint32_t rb_i = GET_INSTR_RB(instr);
+        uint32_t rc_i = GET_INSTR_RC(instr);
+        struct fh_value *ra = &reg_base[ra_i];
+        switch (op) {
             handle_op(OPC_LDC) {
                 *ra = const_base[GET_INSTR_RU(instr)];
                 break;
@@ -390,13 +396,13 @@ changed_stack_frame: {
             }
 
             handle_op(OPC_MOV) {
-                *ra = *LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
+                *ra = *LOAD_REG_OR_CONST(rb_i);
                 break;
             }
 
             handle_op(OPC_RET) {
-                if (GET_INSTR_RA(instr))
-                    vm->stack[frame->base - 1] = *LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
+                if (ra_i)
+                    vm->stack[frame->base - 1] = *LOAD_REG_OR_CONST(rb_i);
                 else
                     vm->stack[frame->base - 1].type = FH_VAL_NULL;
 
@@ -432,36 +438,27 @@ changed_stack_frame: {
             }
 
             handle_op(OPC_GETEL) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
-                struct fh_value *rc = LOAD_REG_OR_CONST(GET_INSTR_RC(instr));
+                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+                struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
 
                 switch (rb->type) {
                     case FH_VAL_ARRAY: {
                         uint32_t idx;
                         if (vm_assert_index(vm, rc, &idx, "array") < 0)
                             goto user_err;
-                        //
-                        // struct fh_array *arr = GET_OBJ_ARRAY(rb->data.obj);
-                        // if (idx >= (uint32_t) arr->len) {
-                        //     ra->type = FH_VAL_NULL;
-                        // } else {
-                        //     *ra = arr->items[idx];
-                        // }
-                        // uint32_t idx = (uint32_t) rc->data.num; // no check
+
                         const struct fh_array *arr = GET_OBJ_ARRAY(rb->data.obj);
                         if (idx < arr->len) *ra = arr->items[idx];
                         else ra->type = FH_VAL_NULL;
                         break;
                     }
                     case FH_VAL_MAP: {
-                        // if (rc->type == FH_VAL_NULL) {
-                        //     *ra = fh_new_null();
-                        //     break;
-                        // }
-                        // if (rc->type == FH_VAL_FLOAT && !isfinite(rc->data.num)) {
-                        //     *ra = fh_new_null();
-                        //     break;
-                        // }
+                        const double d = rc->data.num;
+
+                        if (!(d >= 0.0 && d < 4294967296.0)) {
+                            vm_error(vm, "invalid %d access (index out of range)", d);
+                            return -1;
+                        }
 
                         if (fh_get_map_value(rb, rc, ra) < 0) {
                             *ra = fh_new_null();
@@ -491,30 +488,22 @@ changed_stack_frame: {
             }
 
             handle_op(OPC_SETEL) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
-                struct fh_value *rc = LOAD_REG_OR_CONST(GET_INSTR_RC(instr));
+                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+                struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
                 if (ra->type == FH_VAL_ARRAY) {
                     uint32_t idx;
                     if (vm_assert_index(vm, rb, &idx, "array") < 0)
                         goto user_err;
-                    //
-                    // struct fh_array *arr = GET_OBJ_ARRAY(ra->data.obj);
-                    //
-                    // if (idx >= (uint32_t) arr->len) {
-                    //     vm_error(vm, "invalid array index, %u", idx);
-                    //     goto user_err;
-                    // }
-                    // FAST PATH (assume numeric index)
-                    // uint32_t idx = (uint32_t) rb->data.num;
 
                     struct fh_array *arr = GET_OBJ_ARRAY(ra->data.obj);
 
-                    // Write only if in bounds (otherwise ignore or error)
-                    if (idx < (uint32_t) arr->len) {
+                    if (idx < arr->len) {
                         arr->items[idx] = *rc;
+                    } else {
+                        vm_error(vm, "array index out of bounds");
+                        goto user_err;
                     }
 
-                    // arr->items[idx] = *rc;
                     break;
                 }
                 if (ra->type == FH_VAL_MAP) {
@@ -578,7 +567,7 @@ changed_stack_frame: {
             }
 
             handle_op(OPC_CLOSURE) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
+                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
                 if (rb->type != FH_VAL_FUNC_DEF) {
                     vm_error(vm, "invalid value for closure (not a func_def)");
                     goto err;
@@ -588,12 +577,11 @@ changed_stack_frame: {
                 if (!c)
                     goto err;
                 GC_PIN_OBJ(c);
-                struct fh_vm_call_frame *frame = NULL;
-                int i = 0;
-                for (; i < func_def->n_upvals; i++) {
+                // struct fh_vm_call_frame *frame = NULL;
+                for (int i = 0; i < func_def->n_upvals; i++) {
                     if (func_def->upvals[i].type == FH_UPVAL_TYPE_UPVAL) {
-                        if (frame == NULL)
-                            frame = call_frame_stack_top(&vm->call_stack);
+                        // if (frame == NULL)
+                        // frame = call_frame_stack_top(&vm->call_stack);
                         c->upvals[i] = frame->closure->upvals[func_def->upvals[i].num];
                     } else {
                         c->upvals[i] = find_or_add_upval(vm, &reg_base[func_def->upvals[i].num]);
@@ -602,25 +590,22 @@ changed_stack_frame: {
                 }
                 ra->type = FH_VAL_CLOSURE;
                 ra->data.obj = c;
-                i = 0;
-                for (; i < func_def->n_upvals; i++)
+                for (int i = 0; i < func_def->n_upvals; i++)
                     GC_UNPIN_OBJ(c->upvals[i]);
                 GC_UNPIN_OBJ(c);
                 break;
             }
 
             handle_op(OPC_GETUPVAL) {
-                int b = GET_INSTR_RB(instr);
-                struct fh_vm_call_frame *frame = call_frame_stack_top(&vm->call_stack);
-                *ra = *frame->closure->upvals[b]->val;
+                //TODO am scos? struct fh_vm_call_frame *frame = call_frame_stack_top(&vm->call_stack);
+                *ra = *frame->closure->upvals[rb_i]->val;
                 break;
             }
 
             handle_op(OPC_SETUPVAL) {
-                int a = GET_INSTR_RA(instr);
-                struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
-                struct fh_vm_call_frame *frame = call_frame_stack_top(&vm->call_stack);
-                *frame->closure->upvals[a]->val = *rb;
+                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+                //TODO am scos? struct fh_vm_call_frame *frame = call_frame_stack_top(&vm->call_stack);
+                *frame->closure->upvals[ra_i]->val = *rb;
                 break;
             }
 
@@ -655,7 +640,7 @@ changed_stack_frame: {
             }
 
             handle_op(OPC_INC) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
+                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
                 if (rb->type != FH_VAL_FLOAT) {
                     vm_error(vm, "increment on non-numeric value");
                     goto user_err;
@@ -666,7 +651,7 @@ changed_stack_frame: {
             }
 
             handle_op(OPC_DEC) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
+                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
                 if (rb->type != FH_VAL_FLOAT) {
                     vm_error(vm, "decrement on non-numeric value");
                     goto user_err;
@@ -676,8 +661,8 @@ changed_stack_frame: {
                 break;
             }
             handle_op(OPC_ADD) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
-                struct fh_value *rc = LOAD_REG_OR_CONST(GET_INSTR_RC(instr));
+                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+                struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
 
                 if (rb->type == FH_VAL_FLOAT && rc->type == FH_VAL_FLOAT) {
                     ra->type = FH_VAL_FLOAT;
@@ -779,8 +764,8 @@ changed_stack_frame: {
             }
 
             handle_op(OPC_MOD) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
-                struct fh_value *rc = LOAD_REG_OR_CONST(GET_INSTR_RC(instr));
+                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+                struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
                 if (rb->type != FH_VAL_FLOAT || rc->type != FH_VAL_FLOAT) {
                     vm_error(vm, "arithmetic on non-numeric values");
                     goto user_err;
@@ -796,7 +781,7 @@ changed_stack_frame: {
             }
 
             handle_op(OPC_NOT) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
+                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
                 *ra = fh_new_bool(! fh_val_is_true(rb));
                 break;
             }
@@ -804,7 +789,6 @@ changed_stack_frame: {
             handle_op(OPC_CALL) {
                 //dump_regs(vm);
                 int ret_reg = (int) (ra - vm->stack); // <- slot absolut (R[A])
-                int n_args = GET_INSTR_RB(instr); // <- B
                 const uint8_t t = ra->type;
 
                 if (t == FH_VAL_CLOSURE) {
@@ -814,7 +798,7 @@ changed_stack_frame: {
                      * WARNING: prepare_call() may move the stack, so don't trust reg_base
                      * or ra after calling it -- jumping to changed_stack_frame fixes it.
                      */
-                    struct fh_vm_call_frame *new_frame = prepare_call(vm, cl, ret_reg, n_args);
+                    struct fh_vm_call_frame *new_frame = prepare_call(vm, cl, ret_reg, rb_i);
                     if (!new_frame) goto err;
 
                     new_frame->ret_addr = pc;
@@ -822,13 +806,11 @@ changed_stack_frame: {
                     goto changed_stack_frame;
                 }
                 if (t == FH_VAL_C_FUNC) {
-                    struct fh_vm_call_frame *new_frame = prepare_c_call(vm, ret_reg, n_args);
+                    struct fh_vm_call_frame *new_frame = prepare_c_call(vm, ret_reg, rb_i);
                     if (!new_frame) goto err;
 
-                    int r = call_c_func(vm, ra->data.c_func,
-                                        vm->stack + new_frame->base - 1,
-                                        vm->stack + new_frame->base,
-                                        n_args);
+                    int r = call_c_func(vm, ra->data.c_func, vm->stack + new_frame->base - 1,
+                                        vm->stack + new_frame->base, rb_i);
 
                     call_frame_stack_pop(&vm->call_stack, NULL);
                     if (r < 0) goto user_err;
@@ -843,8 +825,7 @@ changed_stack_frame: {
             }
 
             handle_op(OPC_JMP) {
-                int a = GET_INSTR_RA(instr);
-                while (a-- > 0) {
+                while (ra_i-- > 0) {
                     if (!vm->open_upvals) break;
                     close_upval(vm);
                 }
@@ -853,9 +834,8 @@ changed_stack_frame: {
             }
 
             handle_op(OPC_TEST) {
-                int a = GET_INSTR_RA(instr);
-                struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
-                cmp_test = fh_val_is_true(rb) ^ a;
+                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+                cmp_test = fh_val_is_true(rb) ^ ra_i;
                 if (cmp_test) {
                     pc++;
                     break;
@@ -865,10 +845,9 @@ changed_stack_frame: {
             }
 
             handle_op(OPC_CMP_EQ) {
-                int inv = GET_INSTR_RA(instr);
-                struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
-                struct fh_value *rc = LOAD_REG_OR_CONST(GET_INSTR_RC(instr));
-                cmp_test = fh_vals_are_equal(rb, rc) ^ inv;
+                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+                struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+                cmp_test = fh_vals_are_equal(rb, rc) ^ ra_i;
                 if (cmp_test)
                     pc++;
                 break;
@@ -934,8 +913,8 @@ changed_stack_frame: {
 
             handle_op(OPC_APPEND) {
                 //append rA, rB(value), rC(array)
-                struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr)); // value
-                struct fh_value *rc = LOAD_REG_OR_CONST(GET_INSTR_RC(instr)); // array
+                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i); // value
+                struct fh_value *rc = LOAD_REG_OR_CONST(rc_i); // array
 
                 if (rc->type != FH_VAL_ARRAY) {
                     vm_error(vm, "append(): argument 1 must be array");

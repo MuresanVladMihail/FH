@@ -1,6 +1,5 @@
 fn main() {
-    # let a = [];
-    println([1]);
-    # append(a, 3);
-    # let c = {"a":fn(){return 3;}};
+    let a = [1,2,3];
+    a[0] = 3;
+    println("ok!");
 }

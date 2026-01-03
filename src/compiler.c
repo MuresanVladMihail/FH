@@ -205,7 +205,7 @@ static int set_jmp_target(struct fh_compiler *c, struct fh_src_loc loc, int inst
     if (!fi)
         return -1;
 
-    int diff = target_addr - instr_addr - 1;
+    const int diff = target_addr - instr_addr - 1;
     if (diff < -(1 << 17) || diff > (1 << 17))
         return fh_compiler_error(c, loc, "too far to jump (%u to %u)", instr_addr, target_addr);
     int cur_pc = get_cur_pc(c, loc);
@@ -715,11 +715,11 @@ static int compile_load_lvalue_to_reg(struct fh_compiler *c, struct fh_p_expr *l
 }
 
 static int compile_store_reg_to_lvalue(struct fh_compiler *c, struct fh_p_expr *lv, int src_rk) {
-    struct fh_src_loc loc = lv->loc;
+    const struct fh_src_loc loc = lv->loc;
 
     if (lv->type == EXPR_VAR) {
         // local?
-        int r = get_var_reg(c, loc, lv->data.var);
+        const int r = get_var_reg(c, loc, lv->data.var);
         if (r >= 0) {
             return add_instr(c, loc, MAKE_INSTR_AB(OPC_MOV, r, src_rk));
         }
@@ -735,6 +735,7 @@ static int compile_store_reg_to_lvalue(struct fh_compiler *c, struct fh_p_expr *
     }
 
     if (lv->type == EXPR_INDEX) {
+        fh_dump_expr(c->ast, lv->data.index.container);
         int container_rk = compile_expr(c, lv->data.index.container);
         if (container_rk < 0) return -1;
 
@@ -759,7 +760,7 @@ static int compile_store_reg_to_lvalue(struct fh_compiler *c, struct fh_p_expr *
 static int compile_bin_op_to_reg(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_expr_bin_op *expr,
                                  int dest_reg) {
     if (expr->op == '=') {
-        int reg = compile_bin_op(c, loc, expr);
+        const int reg = compile_bin_op(c, loc, expr);
         if (reg < 0 || add_instr(c, loc, MAKE_INSTR_AB(OPC_MOV, dest_reg, reg)) < 0)
             return -1;
         return dest_reg;
@@ -849,9 +850,6 @@ static int compile_bin_op_to_reg(struct fh_compiler *c, struct fh_src_loc loc, s
 
 static int compile_bin_op(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_expr_bin_op *expr) {
     if (expr->op == '=') {
-        if (expr->left->type == EXPR_CONST) {
-            return fh_compiler_error(c, expr->left->loc, "cannot reassign constant variable");
-        }
         if (expr->left->type == EXPR_VAR) {
             // local var
             int left_reg = get_var_reg(c, loc, expr->left->data.var);
@@ -901,6 +899,10 @@ static int compile_bin_op(struct fh_compiler *c, struct fh_src_loc loc, struct f
             if (add_instr(c, loc, MAKE_INSTR_ABC(OPC_SETEL, container_rk, index_rk, val_rk)) < 0)
                 return -1;
             return val_rk;
+        }
+
+        if (expr->left->type == EXPR_CONST) {
+            return fh_compiler_error(c, expr->left->loc, "cannot reassign constant variable");
         }
 
         return fh_compiler_error(c, loc, "invalid assignment");
@@ -1014,7 +1016,7 @@ static int compile_func_call(struct fh_compiler *c, struct fh_src_loc loc, struc
 
         return arr_rk;
     }
-    int func_reg = alloc_n_regs(c, loc, n_args + 1);
+    const int func_reg = alloc_n_regs(c, loc, n_args + 1);
     if (func_reg < 0 || compile_expr_to_reg(c, expr->func, func_reg) < 0)
         return -1;
     int reg = func_reg + 1;
