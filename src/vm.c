@@ -320,9 +320,9 @@ static void save_error_loc(struct fh_vm *vm) {
 
 #define LOAD_REG(index)    (&reg_base[index])
 
-#define do_simple_arithmetic(op, ra, instr)  { \
-    struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr)); \
-    struct fh_value *rc = LOAD_REG_OR_CONST(GET_INSTR_RC(instr)); \
+#define do_simple_arithmetic(op, ra, rb_i, rc_i)  { \
+    struct fh_value *rb = LOAD_REG_OR_CONST(rb_i); \
+    struct fh_value *rc = LOAD_REG_OR_CONST(rc_i); \
     if (rb->type != FH_VAL_FLOAT || rc->type != FH_VAL_FLOAT) { \
         vm_error(vm, "arithmetic on non-numeric values"); \
         goto user_err; \
@@ -330,8 +330,8 @@ static void save_error_loc(struct fh_vm *vm) {
     ra->type = FH_VAL_FLOAT; \
     ra->data.num = rb->data.num op rc->data.num; \
 }
-#define do_simple_arithmetic_unary(op, ra, instr)  { \
-    struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr)); \
+#define do_simple_arithmetic_unary(op, ra, rb_i)  { \
+    struct fh_value *rb = LOAD_REG_OR_CONST(rb_i); \
     if (rb->type != FH_VAL_FLOAT) { \
         vm_error(vm, "arithmetic on non-numeric values"); \
         goto user_err; \
@@ -339,9 +339,9 @@ static void save_error_loc(struct fh_vm *vm) {
     ra->type = FH_VAL_FLOAT; \
     ra->data.num = op rb->data.num; \
 }
-#define do_test_arithmetic(op, ret, instr)  { \
-    struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr)); \
-    struct fh_value *rc = LOAD_REG_OR_CONST(GET_INSTR_RC(instr)); \
+#define do_test_arithmetic(op, ret, rb_i, rc_i)  { \
+    struct fh_value *rb = LOAD_REG_OR_CONST(rb_i); \
+    struct fh_value *rc = LOAD_REG_OR_CONST(rc_i); \
     if (rb->type != FH_VAL_FLOAT || rc->type != FH_VAL_FLOAT) { \
         char err[128] = {0}; \
         sprintf(err, "using %s with non-numeric values", #op); \
@@ -350,9 +350,9 @@ static void save_error_loc(struct fh_vm *vm) {
     } \
     *ret = rb->data.num op rc->data.num; \
 }
-#define do_bitwise_arithmetic(op, ra, instr)  { \
-    struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr)); \
-    struct fh_value *rc = LOAD_REG_OR_CONST(GET_INSTR_RC(instr)); \
+#define do_bitwise_arithmetic(op, ra, rb_i, rc_i)  { \
+    struct fh_value *rb = LOAD_REG_OR_CONST(rb_i); \
+    struct fh_value *rc = LOAD_REG_OR_CONST(rc_i); \
     if (rb->type != FH_VAL_FLOAT || rc->type != FH_VAL_FLOAT) { \
         vm_error(vm, "bitwise arithmetic on non-numeric values"); \
         goto user_err; \
@@ -615,27 +615,27 @@ changed_stack_frame: {
             }
 
             handle_op(OPC_RSHIFT) {
-                do_bitwise_arithmetic(>>, ra, instr);
+                do_bitwise_arithmetic(>>, ra, rb_i, rc_i);
                 break;
             }
 
             handle_op(OPC_LSHIFT) {
-                do_bitwise_arithmetic(<<, ra, instr);
+                do_bitwise_arithmetic(<<, ra, rb_i, rc_i);
                 break;
             }
 
             handle_op(OPC_BOR) {
-                do_bitwise_arithmetic(|, ra, instr);
+                do_bitwise_arithmetic(|, ra, rb_i, rc_i);
                 break;
             }
 
             handle_op(OPC_BAND) {
-                do_bitwise_arithmetic(&, ra, instr);
+                do_bitwise_arithmetic(&, ra, rb_i, rc_i);
                 break;
             }
 
             handle_op(OPC_BXOR) {
-                do_bitwise_arithmetic(^, ra, instr);
+                do_bitwise_arithmetic(^, ra, rb_i, rc_i);
                 break;
             }
 
@@ -749,17 +749,17 @@ changed_stack_frame: {
             }
 
             handle_op(OPC_SUB) {
-                do_simple_arithmetic(-, ra, instr);
+                do_simple_arithmetic(-, ra, rb_i, rc_i);
                 break;
             }
 
             handle_op(OPC_MUL) {
-                do_simple_arithmetic(*, ra, instr);
+                do_simple_arithmetic(*, ra, rb_i, rc_i);
                 break;
             }
 
             handle_op(OPC_DIV) {
-                do_simple_arithmetic(/, ra, instr);
+                do_simple_arithmetic(/, ra, rb_i, rc_i);
                 break;
             }
 
@@ -855,7 +855,7 @@ changed_stack_frame: {
 
             handle_op(OPC_CMP_GT) {
                 cmp_test = 0;
-                do_test_arithmetic(>, &cmp_test, instr);
+                do_test_arithmetic(>, &cmp_test, rb_i, rc_i);
                 if (cmp_test)
                     pc++;
                 break;
@@ -863,7 +863,7 @@ changed_stack_frame: {
 
             handle_op(OPC_CMP_GE) {
                 cmp_test = 0;
-                do_test_arithmetic(>=, &cmp_test, instr);
+                do_test_arithmetic(>=, &cmp_test, rb_i, rc_i);
                 if (cmp_test)
                     pc++;
                 break;
@@ -871,7 +871,7 @@ changed_stack_frame: {
 
             handle_op(OPC_CMP_LT) {
                 cmp_test = 0;
-                do_test_arithmetic(<, &cmp_test, instr);
+                do_test_arithmetic(<, &cmp_test, rb_i, rc_i);
                 if (cmp_test)
                     pc++;
                 break;
@@ -879,14 +879,14 @@ changed_stack_frame: {
 
             handle_op(OPC_CMP_LE) {
                 cmp_test = 0;
-                do_test_arithmetic(<=, &cmp_test, instr);
+                do_test_arithmetic(<=, &cmp_test, rb_i, rc_i);
                 if (cmp_test)
                     pc++;
                 break;
             }
 
             handle_op(OPC_LEN) {
-                struct fh_value *rb = LOAD_REG_OR_CONST(GET_INSTR_RB(instr));
+                struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
                 switch (rb->type) {
                     case FH_VAL_ARRAY: {
                         ra->type = FH_VAL_FLOAT;
