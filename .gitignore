@@ -301,3 +301,6 @@ obj/
 # Xmake cache
 .xmake/
 build/
+
+# Build
+fh
