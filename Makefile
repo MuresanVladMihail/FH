@@ -1,7 +1,7 @@
 OS=$(shell uname -s)
 
 CC = gcc
-CFLAGS = -std=c99 -DFH_USE_MAIN_FUNC=1
+CFLAGS = -std=c99 -DFH_USE_MAIN_FUNC=1 -fcommon
 LDFLAGS =
 LIBS = -lm -ldl
 
