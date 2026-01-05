@@ -1,5 +1,8 @@
-#include "vec.h"
 #include <limits.h>
+#include <stdint.h>
+#include <stdlib.h> /* For malloc/realloc/free */
+
+#include "vec.h"
 
 /* ---- helpers ---- */
 

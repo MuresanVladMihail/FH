@@ -1,7 +1,7 @@
 OS=$(shell uname -s)
 
 CC = gcc
-CFLAGS = -std=c99 -DFH_USE_MAIN_FUNC=1
+CFLAGS = -std=c99 -DFH_USE_MAIN_FUNC=1 -fcommon
 LDFLAGS =
 LIBS = -lm -ldl
 
@@ -155,6 +155,7 @@ asan:
 	        fh
 
 clean:
+	find src -name "*.o" -type f -delete
 	rm -f fh src/*.o *~ src/lib/*.o src/map/*.o tests/dynamic_libraries/*.so
 
 .PHONY: $(TARGETS) build clean check test dump_exported_symbols dynamic_lib_test install uninstall
