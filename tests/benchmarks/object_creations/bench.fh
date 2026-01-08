@@ -1,0 +1,52 @@
+fn bench_objects(N) {
+    let v = [];
+    let i = 0;
+
+    # alloc_only: create N objects
+    while (i < N) {
+        let o = {};
+        o["x"] = i;
+        o["y"] = i + 1;
+        o["z"] = i + 2;
+        o["next"] = null;
+        append(v, o);
+        i = i + 1;
+    }
+
+    # link: next pointers
+    i = 0;
+    while (i < N - 1) {
+        v[i]["next"] = v[i + 1];
+        i = i + 1;
+    }
+
+    # mutate + checksum
+    let checksum = 0.0;
+    i = 0;
+    while (i < N) {
+        let o = v[i];
+        o["x"] = o["x"] + 1;
+        o["y"] = o["y"] + 2;
+        o["z"] = o["z"] + 3;
+        checksum = checksum + o["x"] + o["y"] + o["z"];
+        i = i + 1;
+    }
+
+    # alloc_churn: create temp objects, keep only 1/10
+    let keep = [];
+    i = 0;
+    while (i < N * 3) {
+        let t = {};
+        t["a"] = i;
+        t["b"] = i + 1;
+        t["c"] = i + 2;
+        if ((i % 10) == 0) append(keep, t);
+        i = i + 1;
+    }
+
+    println(checksum + len(v) + len(keep));
+}
+
+fn main() {
+    bench_objects(1000000);
+}
