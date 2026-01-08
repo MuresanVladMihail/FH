@@ -184,7 +184,7 @@ struct fh_value *fh_grow_array_object(struct fh_program *prog, struct fh_array *
 
 struct fh_value *fh_grow_array_object_uninit(struct fh_program *prog, struct fh_array *arr, uint32_t num_items);
 
-bool fh_reserve_array_capacity(struct fh_program *prog, struct fh_array *arr, uint32_t min_cap);
+int fh_reserve_array_capacity(struct fh_program *prog, struct fh_array *arr, uint32_t min_cap);
 
 void fh_reset_array(struct fh_array *arr);
 
@@ -194,11 +194,10 @@ int fh_alloc_map_object_len(struct fh_map *map, uint32_t len);
 
 int fh_next_map_object_key(struct fh_map *map, struct fh_value *key, struct fh_value *next_key);
 
-void fh_extends_map(struct fh_program *prog, struct fh_map *map, struct fh_map *from);
-
 int fh_get_map_object_value(struct fh_map *map, struct fh_value *key, struct fh_value *val);
 
-int fh_add_map_object_entry(struct fh_program *prog, struct fh_map *map, struct fh_value *key, struct fh_value *val);
+int fh_add_map_object_entry(struct fh_program *prog, struct fh_map *map, struct fh_value *key,
+                            const struct fh_value *val);
 
 int fh_delete_map_object_entry(struct fh_map *map, struct fh_value *key);
 

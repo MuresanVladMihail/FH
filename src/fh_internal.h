@@ -74,7 +74,7 @@ void fh_dump_value(const struct fh_value *val);
 
 void fh_dump_string(const char *str);
 
-void fh_dump_map(struct fh_map *map);
+void fh_dump_map(const struct fh_map *map);
 
 const void *fh_decode_src_loc(const void *encoded, int encoded_len, struct fh_src_loc *src_loc, int n_instr);
 

@@ -12,8 +12,91 @@
 #include "value.h"
 
 #ifndef FH_MAXSHORTLEN
-#define FH_MAXSHORTLEN 40
+#define FH_MAXSHORTLEN 64
 #endif
+
+static inline struct fh_value fh_add_string_float(struct fh_program *prog, struct fh_string *s, const double num) {
+    char buf[FH_MAXSHORTLEN];
+    int n = snprintf(buf, sizeof(buf), "%s%g", GET_OBJ_STRING_DATA(s), num);
+
+    if (n >= 0 && n < (int) sizeof(buf)) {
+        return fh_new_string(prog, buf);
+    }
+
+    /* fallback heap */
+    if (n < 0) {
+        fh_set_error(prog, "string formatting failed");
+        return fh_new_null();
+    }
+
+    char *heap = malloc((size_t) n + 1);
+    if (!heap) {
+        fh_set_error(prog, "out of memory");
+        return fh_new_null();
+    }
+
+    snprintf(heap, (size_t)n + 1, "%s%g", GET_OBJ_STRING_DATA(s), num);
+
+    const struct fh_value v = fh_new_string(prog, heap);
+    free(heap);
+    return v;
+}
+
+static inline struct fh_value fh_add_float_string(struct fh_program *prog, const double num, struct fh_string *s) {
+    char buf[FH_MAXSHORTLEN];
+    int n = snprintf(buf, sizeof(buf), "%g%s", num, GET_OBJ_STRING_DATA(s));
+
+    if (n >= 0 && n < (int) sizeof(buf)) {
+        return fh_new_string(prog, buf);
+    }
+
+    if (n < 0) {
+        fh_set_error(prog, "string formatting failed");
+        return fh_new_null();
+    }
+
+    char *heap = malloc((size_t) n + 1);
+    if (!heap) {
+        fh_set_error(prog, "out of memory");
+        return fh_new_null();
+    }
+
+    snprintf(heap, (size_t)n + 1, "%g%s",
+             num, GET_OBJ_STRING_DATA(s));
+
+    struct fh_value v = fh_new_string(prog, heap);
+    free(heap);
+    return v;
+}
+
+static inline struct fh_value fh_add_string_string(struct fh_program *prog, struct fh_string *a, struct fh_string *b) {
+    const char *sa = GET_OBJ_STRING_DATA(a);
+    const char *sb = GET_OBJ_STRING_DATA(b);
+
+    const size_t la = strlen(sa);
+    const size_t lb = strlen(sb);
+    const size_t len = la + lb + 1;
+
+    if (len <= FH_MAXSHORTLEN) {
+        char buf[FH_MAXSHORTLEN];
+        memcpy(buf, sa, la);
+        memcpy(buf + la, sb, lb + 1);
+        return fh_new_string(prog, buf);
+    }
+
+    char *heap = malloc(len);
+    if (!heap) {
+        fh_set_error(prog, "out of memory");
+        return fh_new_null();
+    }
+
+    memcpy(heap, sa, la);
+    memcpy(heap + la, sb, lb + 1);
+
+    struct fh_value v = fh_new_string(prog, heap);
+    free(heap);
+    return v;
+}
 
 static void fh_init_char_cache(struct fh_vm *vm) {
     for (int i = 0; i < 256; i++) {
@@ -620,12 +703,10 @@ op_SETEL: {
                 goto user_err;
 
             struct fh_array *arr = GET_OBJ_ARRAY(ra->data.obj);
-            if (idx < arr->len) {
-                arr->items[idx] = *rc;
-            } else {
-                vm_error(vm, "array index out of bounds");
-                goto user_err;
+            if (idx >= arr->len) {
+                fh_grow_array_object(vm->prog, arr, idx + 1);
             }
+            arr->items[idx] = *rc;
 
             DISPATCH();
         }
@@ -657,7 +738,7 @@ op_NEWARRAY: {
             GC_UNPIN_OBJ(arr);
             memcpy(first, ra + 1, (size_t)n_elems * sizeof(struct fh_value));
         } else {
-            fh_reserve_array_capacity(vm->prog, arr, 128);
+            fh_reserve_array_capacity(vm->prog, arr, 8);
         }
 
         ra->type = FH_VAL_ARRAY;
@@ -666,16 +747,20 @@ op_NEWARRAY: {
     }
 
 op_NEWMAP: {
-        int n_elems = (int) ru;
-        int n_elems_half = n_elems >> 1;
+        int n_elems = (int) ru; // number of registers after ra (key/val pairs)
+        int n_pairs = n_elems >> 1;
 
         struct fh_map *map = fh_make_map(vm->prog, false);
-        if (!map || fh_alloc_map_object_len(map, n_elems) < 0)
+        if (!map)
             goto err;
 
-        if (n_elems != 0) {
+        // Only reserve/alloc if we actually have elements in the literal
+        if (n_pairs != 0) {
+            // Allocate enough capacity for the pairs we’ll insert
+            if (fh_alloc_map_object_len(map, (uint32_t) n_pairs) < 0) goto err;
+
             GC_PIN_OBJ(map);
-            for (int i = 0; i < n_elems_half; i++) {
+            for (int i = 0; i < n_pairs; i++) {
                 int ni = i << 1;
                 struct fh_value *key = &ra[ni + 1];
                 struct fh_value *val = &ra[ni + 2];
@@ -685,6 +770,8 @@ op_NEWMAP: {
                 }
             }
             GC_UNPIN_OBJ(map);
+        } else {
+            if (fh_alloc_map_object_len(map, 8) < 0) goto err; // cap ~16
         }
 
         ra->type = FH_VAL_MAP;
@@ -799,104 +886,26 @@ op_ADD: {
             DISPATCH();
         }
 
-        if (rb->type == FH_VAL_STRING) {
-            const char *s1 = GET_OBJ_STRING_DATA(rb->data.obj);
-
-            if (rc->type == FH_VAL_STRING) {
-                const char *s2 = GET_OBJ_STRING_DATA(rc->data.obj);
-
-                const size_t len = strlen(s1) + strlen(s2) + 1;
-                if (len <= FH_MAXSHORTLEN) {
-                    char concat[len];
-                    snprintf(concat, len, "%s%s", s1, s2);
-                    *ra = fh_new_string(vm->prog, concat);
-                    DISPATCH();
-                }
-
-                char *concat = malloc(len);
-                if (!concat) {
-                    vm_error_oom(vm);
-                    goto err;
-                }
-                snprintf(concat, len, "%s%s", s1, s2);
-                *ra = fh_new_string(vm->prog, concat);
-                free(concat);
-                DISPATCH();
-            }
-
-            if (rc->type == FH_VAL_FLOAT) {
-                int needed = snprintf(NULL, 0, "%s%g", s1, rc->data.num) + 1;
-                if (needed <= FH_MAXSHORTLEN) {
-                    char concate[needed];
-                    snprintf(concate, (size_t)needed, "%s%g", s1, rc->data.num);
-                    *ra = fh_new_string(vm->prog, concate);
-                    DISPATCH();
-                }
-
-                char *concate = malloc((size_t) needed);
-                if (!concate) {
-                    vm_error_oom(vm);
-                    goto err;
-                }
-                snprintf(concate, (size_t)needed, "%s%g", s1, rc->data.num);
-                *ra = fh_new_string(vm->prog, concate);
-                free(concate);
-                DISPATCH();
-            }
+        if (rb->type == FH_VAL_STRING && rc->type == FH_VAL_STRING) {
+            *ra = fh_add_string_string(vm->prog,GET_VAL_STRING(rb),GET_VAL_STRING(rc));
+            DISPATCH();
         }
 
-        if (rc->type == FH_VAL_STRING) {
-            const char *s1 = GET_OBJ_STRING_DATA(rc->data.obj);
-
-            if (rb->type == FH_VAL_STRING) {
-                const char *s2 = GET_OBJ_STRING_DATA(rb->data.obj);
-
-                const size_t len = strlen(s1) + strlen(s2) + 1;
-                if (len <= FH_MAXSHORTLEN) {
-                    char concate[len];
-                    snprintf(concate, len, "%s%s", s1, s2);
-                    *ra = fh_new_string(vm->prog, concate);
-                    DISPATCH();
-                }
-
-                char *concate = malloc(len);
-                if (!concate) {
-                    vm_error_oom(vm);
-                    goto err;
-                }
-                snprintf(concate, len, "%s%s", s1, s2);
-                *ra = fh_new_string(vm->prog, concate);
-                free(concate);
-                DISPATCH();
-            }
-
-            if (rb->type == FH_VAL_FLOAT) {
-                int needed = snprintf(NULL, 0, "%g%s", rb->data.num, s1) + 1;
-                if (needed <= FH_MAXSHORTLEN) {
-                    char concate[needed];
-                    snprintf(concate, (size_t)needed, "%g%s", rb->data.num, s1);
-                    *ra = fh_new_string(vm->prog, concate);
-                    DISPATCH();
-                }
-
-                char *concate = malloc((size_t) needed);
-                if (!concate) {
-                    vm_error_oom(vm);
-                    goto err;
-                }
-                snprintf(concate, (size_t)needed, "%g%s", rb->data.num, s1);
-                *ra = fh_new_string(vm->prog, concate);
-                free(concate);
-                DISPATCH();
-            }
+        if (rb->type == FH_VAL_STRING && rc->type == FH_VAL_FLOAT) {
+            *ra = fh_add_string_float(vm->prog,GET_VAL_STRING(rb), rc->data.num);
+            DISPATCH();
         }
 
-        vm_error(vm, "can't add the two variables, type %s and type %s",
+        if (rb->type == FH_VAL_FLOAT && rc->type == FH_VAL_STRING) {
+            *ra = fh_add_float_string(vm->prog, rb->data.num,GET_VAL_STRING(rc));
+            DISPATCH();
+        }
+
+        vm_error(vm, "can't add %s and %s",
                  fh_type_to_str(vm->prog, rb->type),
                  fh_type_to_str(vm->prog, rc->type));
         goto user_err;
     }
-
 op_SUB: {
         do_simple_arithmetic(-, ra, rb_i, rc_i);
         DISPATCH();
@@ -1070,9 +1079,7 @@ op_APPEND: {
 
         struct fh_array *arr = GET_OBJ_ARRAY(rc->data.obj);
 
-        GC_PIN_OBJ(arr);
         struct fh_value *slot = fh_grow_array_object_uninit(vm->prog, arr, 1);
-        GC_UNPIN_OBJ(arr);
         if (!slot) goto err;
 
         *slot = *rb;

@@ -40,7 +40,7 @@ static inline uint32_t fmix32(uint32_t h) {
 }
 
 
-uint32_t fh_hash(const void *data, size_t len) {
+uint32_t fh_hash(const void *data, const size_t len) {
 	const uint8_t *p = (const uint8_t *) data;
 
 	// fast path: tiny strings

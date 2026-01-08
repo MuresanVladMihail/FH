@@ -210,15 +210,15 @@ struct fh_value *fh_grow_array(struct fh_program *prog, struct fh_value *val, ui
 
 struct fh_value fh_new_map(struct fh_program *prog);
 
-int fh_alloc_map_len(struct fh_value *map, uint32_t len);
+int fh_alloc_map_len(const struct fh_value *map, uint32_t len);
 
-int fh_next_map_key(struct fh_value *map, struct fh_value *key, struct fh_value *next_key);
+int fh_next_map_key(const struct fh_value *map, struct fh_value *key, struct fh_value *next_key);
 
-int fh_get_map_value(struct fh_value *map, struct fh_value *key, struct fh_value *val);
+int fh_get_map_value(const struct fh_value *map, struct fh_value *key, struct fh_value *val);
 
-int fh_add_map_entry(struct fh_program *prog, struct fh_value *map, struct fh_value *key, struct fh_value *val);
+int fh_add_map_entry(struct fh_program *prog, const struct fh_value *map, struct fh_value *key, struct fh_value *val);
 
-int fh_delete_map_entry(struct fh_value *map, struct fh_value *key);
+int fh_delete_map_entry(const struct fh_value *map, struct fh_value *key);
 
 int fh_run_string(struct fh_program *prog, bool dump_bytecode, const char *string, const char *main_function_name);
 

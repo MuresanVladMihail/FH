@@ -30,8 +30,7 @@ def bench_objects(n)
   # alloc_churn
   keep = []
   i = 0
-  limit = n * 3
-  while i < limit
+  while i < n * 3
     t = { "a" => i, "b" => i + 1, "c" => i + 2 }
     keep << t if (i % 10) == 0
     i += 1

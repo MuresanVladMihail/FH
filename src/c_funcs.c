@@ -127,7 +127,11 @@ static void print_value(struct fh_value *val) {
         case FH_VAL_STRING: printf("%s", GET_VAL_STRING_DATA(val));
             return;
         case FH_VAL_ARRAY: {
-            struct fh_array *v = GET_VAL_ARRAY(val);
+            const struct fh_array *v = GET_VAL_ARRAY(val);
+            if (v->len == 0) {
+                printf("[]");
+                return;
+            }
             for (uint32_t i = 0; i < v->len; i++) {
                 printf("[%u] ", i);
                 fh_dump_value(&v->items[i]);
@@ -136,9 +140,13 @@ static void print_value(struct fh_value *val) {
             return;
         }
         case FH_VAL_MAP: {
-            struct fh_map *v = GET_VAL_MAP(val);
+            const struct fh_map *v = GET_VAL_MAP(val);
+            if (v->len == 0) {
+                printf("{}");
+                return;
+            }
             for (uint32_t i = 0; i < v->cap; i++) {
-                struct fh_map_entry *e = &v->entries[i];
+                const struct fh_map_entry *e = &v->entries[i];
                 if (e->key.type != FH_VAL_NULL) {
                     printf("[%u] ", i);
 
@@ -1960,33 +1968,6 @@ static int fn_error(struct fh_program *prog, struct fh_value *ret, struct fh_val
     return fh_set_error(prog, "%s", str);
 }
 
-// static int fn_len(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-//     // if (check_n_args(prog, "len()", 1, n_args))
-//     // return -1;
-//
-//     switch (args[0].type) {
-//         case FH_VAL_ARRAY: {
-//             struct fh_array *arr = GET_OBJ_ARRAY(args[0].data.obj);
-//             *ret = fh_make_number((double)arr->len);
-//             return 0;
-//         }
-//         case FH_VAL_MAP: {
-//             struct fh_map *map = GET_OBJ_MAP(args[0].data.obj);
-//             *ret = fh_make_number((double)map->len);
-//             return 0;
-//         }
-//         case FH_VAL_STRING: {
-//             struct fh_string *s = GET_OBJ_STRING(args[0].data.obj);
-//             // presupunând că size include terminator
-//             *ret = fh_make_number((double)(s->size ? (s->size - 1) : 0));
-//             return 0;
-//         }
-//         default:
-//             return fh_set_error(prog, "len(): argument 1 must be an array, map or string, got %s",
-//                                 fh_type_to_str(prog, args[0].type));
-//     }
-// }
-
 static int fn_delete(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
     if (check_n_args(prog, "delete()", 2, n_args))
         return -1;
@@ -1995,7 +1976,7 @@ static int fn_delete(struct fh_program *prog, struct fh_value *ret, struct fh_va
     if (arr) {
         if (!fh_is_number(&args[1]))
             return fh_set_error(prog, "delete(): argument 2 must be a number");
-        uint32_t index = (uint32_t) (int) fh_get_number(&args[1]);
+        const uint32_t index = (uint32_t) (int) fh_get_number(&args[1]);
         if (index >= arr->len)
             return fh_set_error(prog, "delete(): array index out of bounds: %d", index);
         *ret = arr->items[index];
@@ -2013,24 +1994,6 @@ static int fn_delete(struct fh_program *prog, struct fh_value *ret, struct fh_va
     }
     return fh_set_error(prog, "delete(): argument 1 must be an array or map, got %s and %s",
                         fh_type_to_str(prog, args[0].type), fh_type_to_str(prog, args[1].type));
-}
-
-static int fn_extends(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (check_n_args(prog, "extends()", 2, n_args))
-        return -1;
-
-    struct fh_map *map = GET_VAL_MAP(&args[0]);
-    if (!map)
-        return fh_set_error(prog, "extends(): argument 1 must be a map");
-
-    struct fh_map *to_extend = GET_VAL_MAP(&args[1]);
-    if (!to_extend)
-        return fh_set_error(prog, "extends(): argument 2 must be a map");
-
-    fh_extends_map(prog, map, to_extend);
-
-    *ret = fh_new_null();
-    return 0;
 }
 
 /**
@@ -2091,53 +2054,35 @@ static int fn_contains_key(struct fh_program *prog, struct fh_value *ret, struct
     return 0;
 }
 
-static int fn_insert(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (check_n_args(prog, "insert()", -3, n_args))
-        return -1;
-    struct fh_array *arr = GET_VAL_ARRAY(&args[0]);
-    if (!arr)
-        return fh_set_error(prog, "insert(): argument 1 must be an array");
-    if (!fh_is_number(&args[1]))
-        return fh_set_error(prog, "insert(): argument 2 must be a number");
+static int fn_reserve(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    if (check_n_args(prog, "reserve()", -2, n_args)) return -1;
 
-    const int index = fh_get_number(&args[1]);
-    if (index < 0)
-        return fh_set_error(prog, "insert(): argument 2 (index) must be a non-negative number");
-    if ((size_t) index > arr->len) {
-        return fh_set_error(prog, "insert(): array index out of bounds: %d", index);
-    }
-    struct fh_value *new_items = fh_grow_array_object(prog, arr, index + 1);
-    if (!new_items)
-        return fh_set_error(prog, "out of memory");
-    arr->items[index] = args[2];
-    *ret = args[0];
-    return 0;
-}
-
-static int fn_grow(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (check_n_args(prog, "grow()", -2, n_args))
-        return -1;
+    const bool is_array = fh_is_array(&args[0]);
+    const bool is_map = fh_is_map(&args[0]);
+    if (!is_array && !is_map)
+        return fh_set_error(prog, "reserve(): argument 1 must be an array or map");
 
     if (!fh_is_number(&args[1]))
-        return fh_set_error(prog, "grow(): argument 2 (size) must be a number");
-    if (fh_get_number(&args[1]) < 0)
-        return fh_set_error(prog, "Expected positive number value for argument 2 (size)");
+        return fh_set_error(prog, "reserve(): argument 2 (capacity) must be a number");
 
-    unsigned int size = fh_get_number(&args[1]);
+    const double d = fh_get_number(&args[1]);
+    if (!isfinite(d) || d < 0.0 || d > (double) UINT32_MAX)
+        return fh_set_error(prog, "reserve(): invalid capacity");
 
-    if (fh_is_array(&args[0])) {
+    const uint32_t cap = (uint32_t) d;
+    if ((double) cap != d)
+        return fh_set_error(prog, "reserve(): capacity must be an integer");
+
+    if (is_array) {
         struct fh_array *arr = GET_VAL_ARRAY(&args[0]);
-        fh_grow_array_object(prog, arr, size);
-        *ret = args[0];
-    } else if (fh_is_string(&args[0])) {
-        const char *string = fh_get_string(&args[0]);
-        char *new_string = calloc(size + 1, 1);
-        strcpy(new_string, string);
-        *ret = fh_new_string(prog, new_string);
-        free(new_string);
+        if (fh_reserve_array_capacity(prog, arr, cap) < 0)
+            return -1;
     } else {
-        return fh_set_error(prog, "grow(): argument 1 must be an array or string");
+        if (fh_alloc_map_len(&args[0], cap) < 0)
+            return -1;
     }
+
+    *ret = args[0];
     return 0;
 }
 
@@ -2162,7 +2107,7 @@ static int fn_println(struct fh_program *prog, struct fh_value *ret, struct fh_v
         frame_index--;
     } while (frame && !frame->closure);
     if (frame) {
-        struct fh_func_def *func_def = frame->closure->func_def;
+        const struct fh_func_def *func_def = frame->closure->func_def;
         printf(" %s:%d:%d\n", fh_get_symbol_name(&prog->src_file_names,
                                                  func_def->code_creation_loc.file_id),
                func_def->code_creation_loc.line, func_def->code_creation_loc.col);
@@ -2362,12 +2307,10 @@ const struct fh_named_c_func fh_std_c_funcs[] = {
     DEF_FN(print),
     DEF_FN(println),
     DEF_FN(printf),
-    DEF_FN(extends),
     DEF_FN(reset),
     DEF_FN(next_key),
     DEF_FN(contains_key),
-    DEF_FN(insert),
-    DEF_FN(grow),
+    DEF_FN(reserve),
     DEF_FN(delete),
 };
 const int fh_std_c_funcs_len = sizeof(fh_std_c_funcs) / sizeof(fh_std_c_funcs[0]);

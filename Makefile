@@ -41,7 +41,7 @@ CHECK_SCRIPT = tests/test.fh
 
 # Possible inputs: debug, debug_dev, debug2, release, debug_san and asan.
 # Note: leave no spaces behind or after the equal sign below
-TARGETS =release
+TARGETS =debug
 
 ifeq ($(TARGETS), debug_dev)
 	CFLAGS += $(DEBUG_DEV_CFLAGS)

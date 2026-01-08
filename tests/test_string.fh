@@ -13,7 +13,7 @@ fn main() {
 
     let a = 47;
     let b = " is my number";
-    let c = a + b + " !";
+    let c = a + b + " !"; # 47 is my number
     assert (c == "47 is my number !");
 
     assert(string_upper("fh") == "FH");
@@ -26,7 +26,6 @@ fn main() {
 
     let a = "foo will be 22 years old in november";
     let index = string_find(a, "years old");
-    println(index);
     let c = string_substr(a, index, len("years old"));
     assert (c == "years old");
 

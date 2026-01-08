@@ -107,9 +107,9 @@ void fh_reset_array(struct fh_array *arr) {
     arr->len = 0;
 }
 
-bool fh_reserve_array_capacity(struct fh_program *prog, struct fh_array *arr, uint32_t min_cap) {
+int fh_reserve_array_capacity(struct fh_program *prog, struct fh_array *arr, uint32_t min_cap) {
     if (min_cap <= arr->cap)
-        return true;
+        return 0;
 
     size_t new_cap = arr->cap ? arr->cap : 8;
     while (new_cap < min_cap)
@@ -118,16 +118,20 @@ bool fh_reserve_array_capacity(struct fh_program *prog, struct fh_array *arr, ui
     void *new_items = realloc(arr->items, new_cap * sizeof(struct fh_value));
     if (!new_items) {
         fh_set_error(prog, "out of memory");
-        return false;
+        return -1;
     }
 
     arr->items = new_items;
     arr->cap = (uint32_t) new_cap;
-    return true;
+    return 0;
 }
 
 struct fh_value *fh_grow_array_object_uninit(struct fh_program *prog, struct fh_array *arr, const uint32_t num_items) {
-    // if (arr->header.type != FH_VAL_ARRAY) return NULL;
+    const uint32_t len = arr->len;
+    if (len < arr->cap) {
+        arr->len = len + 1;
+        return &arr->items[len];
+    }
 
     const size_t need = (size_t) arr->len + num_items;
     if (need > UINT32_MAX) {
@@ -208,13 +212,10 @@ static void *fh_make_object(struct fh_program *prog, const bool pinned, const en
         fh_set_error(prog, "out of memory");
         return NULL;
     }
-    if (pinned) {
-        // if (! p_object_stack_push(&prog->pinned_objs, &obj)) {
-        if (vec_push(&prog->pinned_objs, obj) != 0) {
-            free(obj);
-            fh_set_error(prog, "out of memory");
-            return NULL;
-        }
+    if (pinned && vec_push(&prog->pinned_objs, obj) != 0) {
+        free(obj);
+        fh_set_error(prog, "out of memory");
+        return NULL;
     }
 
     obj->header.next = prog->objects;
@@ -256,7 +257,7 @@ struct fh_func_def *fh_make_func_def(struct fh_program *prog, bool pinned) {
     return func_def;
 }
 
-struct fh_array *fh_make_array(struct fh_program *prog, bool pinned) {
+struct fh_array *fh_make_array(struct fh_program *prog, const bool pinned) {
     struct fh_array *arr = fh_make_object(prog, pinned, FH_VAL_ARRAY, sizeof(struct fh_array));
     if (!arr)
         return NULL;
@@ -267,7 +268,7 @@ struct fh_array *fh_make_array(struct fh_program *prog, bool pinned) {
     return arr;
 }
 
-struct fh_map *fh_make_map(struct fh_program *prog, bool pinned) {
+struct fh_map *fh_make_map(struct fh_program *prog, const bool pinned) {
     struct fh_map *map = fh_make_object(prog, pinned, FH_VAL_MAP, sizeof(struct fh_map));
     if (!map)
         return NULL;
