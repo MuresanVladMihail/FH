@@ -122,7 +122,7 @@ static void print_value(struct fh_value *val) {
             return;
         case FH_VAL_BOOL: printf("%s", (val->data.b) ? "true" : "false");
             return;
-        case FH_VAL_FLOAT: printf("%g", val->data.num);
+        case FH_VAL_FLOAT: printf("%.17g", val->data.num);
             return;
         case FH_VAL_STRING: printf("%s", GET_VAL_STRING_DATA(val));
             return;
@@ -1807,8 +1807,8 @@ static int fn_tointeger(struct fh_program *prog, struct fh_value *ret, struct fh
     if (!fh_is_number(&args[0]))
         return fh_set_error(prog, "expected number, got: %s", fh_type_to_str(prog, args[0].type));
 
-    double num = fh_get_number(&args[0]);
-    *ret = fh_new_number((int)num);
+    const double num = fh_get_number(&args[0]);
+    *ret = fh_new_number((long)num);
 
     return 0;
 }
@@ -2096,24 +2096,42 @@ static int fn_print(struct fh_program *prog, struct fh_value *ret, struct fh_val
 }
 
 
-static int fn_println(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    for (int i = 0; i < n_args; i++)
-        print_value(&args[i]);
-
-    int frame_index = call_frame_stack_size(&prog->vm.call_stack) - 1;
-    struct fh_vm_call_frame *frame;
-    do {
-        frame = call_frame_stack_item(&prog->vm.call_stack, frame_index);
-        frame_index--;
-    } while (frame && !frame->closure);
-    if (frame) {
-        const struct fh_func_def *func_def = frame->closure->func_def;
-        printf(" %s:%d:%d\n", fh_get_symbol_name(&prog->src_file_names,
-                                                 func_def->code_creation_loc.file_id),
-               func_def->code_creation_loc.line, func_def->code_creation_loc.col);
-    } else {
-        puts("");
+static const struct fh_vm_call_frame *fh_find_last_user_frame(const struct fh_vm *vm) {
+    const int n = call_frame_stack_size(&vm->call_stack);
+    for (int i = n - 1; i >= 0; --i) {
+        const struct fh_vm_call_frame *f = call_frame_stack_item(&vm->call_stack, i);
+        if (f && f->closure) return f; // non C-call frame
     }
+    return NULL;
+}
+
+static void fh_print_src_loc_if_any(const struct fh_program *prog,
+                                    const struct fh_vm_call_frame *frame) {
+    if (!frame || !frame->closure) {
+        putchar('\n');
+        return;
+    }
+
+    const struct fh_func_def *func_def = frame->closure->func_def;
+
+    const char *file = fh_get_symbol_name(&prog->src_file_names, func_def->code_creation_loc.file_id);
+
+    if (!file) file = "<unknown>";
+
+    printf(" %s:%d:%d\n",
+           file,
+           func_def->code_creation_loc.line,
+           func_def->code_creation_loc.col);
+}
+
+static int fn_println(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    for (int i = 0; i < n_args; i++) {
+        print_value(&args[i]);
+    }
+
+    const struct fh_vm_call_frame *frame = fh_find_last_user_frame(&prog->vm);
+    fh_print_src_loc_if_any(prog, frame);
+
     *ret = fh_make_null();
     return 0;
 }

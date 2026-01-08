@@ -61,7 +61,7 @@
 
 fn main() {
     let m = {};
-    # reserve(m, 1000000);
+    reserve(m, 1000000);
     let sum = 0;
 
     for (let i = 0; i < 1000000; i = i + 1) {
