@@ -438,7 +438,6 @@ int fh_run_vm(struct fh_vm *vm) {
     int32_t rs = 0;
     struct fh_value *ra = NULL;
 
-    // --- dispatch table (must cover all opcodes you execute)
     static void *dispatch[] = {
         [OPC_LDC] = &&op_LDC,
         [OPC_LDNULL] = &&op_LDNULL,
@@ -935,9 +934,6 @@ op_NOT: {
     }
 
 op_CALL: {
-        // IMPORTANT: compute absolute ret_reg exactly like your original (ra - vm->stack)
-        // but we can avoid the pointer subtraction by: ret_reg = frame->base + ra_i
-        // because ra is &reg_base[ra_i] and reg_base == stack+frame->base
         int ret_reg = frame->base + (int) ra_i;
         const uint8_t t = ra->type;
 

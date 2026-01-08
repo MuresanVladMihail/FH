@@ -1551,7 +1551,7 @@ static int compile_repeat(struct fh_compiler *c, struct fh_src_loc loc, struct f
     if (!fi)
         return -1;
 
-    int parent_num_break_addrs = int_stack_size(&fi->break_addrs);
+    const int parent_num_break_addrs = int_stack_size(&fi->break_addrs);
     int parent_num_continue_addrs = int_stack_size(&fi->continue_addrs);
 
     int start_addr = get_cur_pc(c, loc);
@@ -1609,8 +1609,8 @@ static int compile_for(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p
     if (!fi)
         return -1;
 
-    int parent_num_break_addrs = int_stack_size(&fi->break_addrs);
-    int parent_num_continue_addrs = int_stack_size(&fi->continue_addrs);
+    const int parent_num_break_addrs = int_stack_size(&fi->break_addrs);
+    const int parent_num_continue_addrs = int_stack_size(&fi->continue_addrs);
 
     if (compile_stmt(c, stmt_for->init) < 0) {
         fh_compiler_error(c, stmt_for->stmt->loc, "failed to compile init section in for-loop");

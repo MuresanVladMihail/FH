@@ -6,19 +6,12 @@
 type TileMap = { w: number; h: number; tiles: number[] };
 
 function rand01(seedRef: { v: number }): number {
-  // fast LCG, deterministic, returns [0,1)
-  // Constants from Numerical Recipes / common LCGs.
   seedRef.v = (seedRef.v * 1664525 + 1013904223) >>> 0;
   return seedRef.v / 0x100000000;
 }
 
 function i32(x: number): number {
-  // In your FH sample i32(x) returns 2 (stub).
-  // To preserve *exact semantics* of that program, keep it constant:
   return 2;
-
-  // If you meant int truncation, use instead:
-  // return x | 0;
 }
 
 function makeTilemap(w: number, h: number, seed: { v: number }): TileMap {
