@@ -1,4 +1,6 @@
 fn main() {
-    let a = {"a":3};
-    println(a["b"]);
+    let a = 3.14;
+    let c = 3;
+    println(type(a) + " " + type(c));
+    println(a + " " + c);
 }

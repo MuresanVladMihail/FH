@@ -13,6 +13,7 @@ enum fh_token_type {
     TOK_SYMBOL,
     TOK_STRING,
     TOK_NUMBER,
+    TOK_INTEGER,
     TOK_OP,
     TOK_PUNCT
 };
@@ -39,6 +40,7 @@ struct fh_token {
 
     union {
         double num;
+        int64_t i;
         fh_string_id str;
         enum fh_keyword_type keyword;
         fh_symbol_id symbol_id;
@@ -87,6 +89,7 @@ const char *fh_dump_token(struct fh_ast *ast, struct fh_token *tok);
 
 #define tok_is_eof(tok)          ((tok)->type == TOK_EOF)
 #define tok_is_number(tok)       ((tok)->type == TOK_NUMBER)
+#define tok_is_integer(tok)      ((tok)->type == TOK_INTEGER)
 #define tok_is_string(tok)       ((tok)->type == TOK_STRING)
 #define tok_is_punct(tok, p)     ((tok)->type == TOK_PUNCT && (tok)->data.punct == (p))
 #define tok_is_keyword(tok, kw)  ((tok)->type == TOK_KEYWORD && (tok)->data.keyword == (kw))

@@ -40,6 +40,56 @@ static void free_map(struct fh_map *map) {
     free(map);
 }
 
+int fh_arg_int32(struct fh_program *prog, const struct fh_value *v, const char *fn, int arg_index_0_based,
+                 int32_t *out) {
+    if (!fh_is_number_or_integer(v)) {
+        return fh_set_error(prog, "%s: expected number/integer for argument %d, got %s",
+                            fn, arg_index_0_based + 1, fh_type_to_str(prog, v->type));
+    }
+
+    if (fh_is_integer(v)) {
+        const int64_t x = v->data.i;
+        if (x < INT32_MIN || x > INT32_MAX) {
+            return fh_set_error(prog, "%s: argument %d out of int32 range", fn, arg_index_0_based + 1);
+        }
+        *out = (int32_t) x;
+        return 0;
+    }
+
+    const double d = fh_get_number((struct fh_value*)v);
+    if (!isfinite(d)) {
+        return fh_set_error(prog, "%s: argument %d must be finite", fn, arg_index_0_based + 1);
+    }
+    if (d < (double) INT32_MIN || d > (double) INT32_MAX) {
+        return fh_set_error(prog, "%s: argument %d out of int32 range", fn, arg_index_0_based + 1);
+    }
+    if (trunc(d) != d) {
+        return fh_set_error(prog, "%s: argument %d must be an integer value", fn, arg_index_0_based + 1);
+    }
+
+    *out = (int32_t) d;
+    return 0;
+}
+
+int fh_arg_double(struct fh_program *prog, const struct fh_value *v, const char *fn, int arg_index_0_based,
+                  double *out) {
+    if (fh_is_number(v)) {
+        const double d = v->data.num;
+        if (!isfinite(d)) {
+            return fh_set_error(prog, "%s: argument %d must be finite", fn, arg_index_0_based + 1);
+        }
+        *out = d;
+        return 0;
+    }
+    if (fh_is_integer(v)) {
+        *out = (double) v->data.i;
+        return 0;
+    }
+    return fh_set_error(prog, "%s: expected number/integer for argument %d, got %s", fn, arg_index_0_based + 1,
+                        fh_type_to_str(prog, v->type));
+}
+
+
 void fh_free_object(struct fh_program *prog, union fh_object *obj) {
     prog->alive_objects--;
 
@@ -405,8 +455,9 @@ const char *fh_type_to_str(struct fh_program *prog, enum fh_value_type type) {
         case FH_VAL_BOOL:
             return "bool";
         case FH_VAL_FLOAT:
-        case FH_VAL_INTEGER:
             return "number";
+        case FH_VAL_INTEGER:
+            return "integer";
         case FH_VAL_C_FUNC:
             return "cfunc";
         case FH_VAL_C_OBJ:

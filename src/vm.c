@@ -363,14 +363,55 @@ static bool fh_val_is_true(struct fh_value *val) {
     return false;
 }
 
+#include <stdint.h>
+
+static inline bool fh_double_is_finite(const double d) {
+    const union {
+        double d;
+        uint64_t u;
+    } x = {d};
+
+    // IEEE-754: exponent = bits 52..62
+    // If exponent == 0x7FF → NaN or Inf
+    return (x.u & 0x7ff0000000000000ULL) != 0x7ff0000000000000ULL;
+}
+
+static bool fh_num_equals_int64(const double d, const int64_t i) {
+    // Must be finite (reject NaN/Inf)
+    if (!fh_double_is_finite(d)) return false;
+
+    // Must be an integer-valued double
+    if (trunc(d) != d) return false;
+
+    // Must be representable in int64 range
+    if (d < (double) INT64_MIN || d > (double) INT64_MAX) return false;
+
+    // Convert and compare
+    const int64_t di = (int64_t) d;
+    if (di != i) return false;
+
+    // Ensure the integer is exactly representable as this double
+    // (prevents precision-rounding false positives beyond 2^53)
+    if ((double) i != d) return false;
+
+    return true;
+}
+
 bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
     if (v1->type == FH_VAL_UPVAL)
         v1 = GET_OBJ_UPVAL(v1)->val;
     if (v2->type == FH_VAL_UPVAL)
         v2 = GET_OBJ_UPVAL(v2)->val;
 
-    if (v1->type != v2->type)
+    if (v1->type != v2->type) {
+        if (fh_is_number(v1) && fh_is_integer(v2)) {
+            return fh_num_equals_int64(v1->data.num, v2->data.i);
+        }
+        if (fh_is_integer(v1) && fh_is_number(v2)) {
+            return fh_num_equals_int64(v2->data.num, v1->data.i);
+        }
         return false;
+    }
 
     switch (v1->type) {
         case FH_VAL_NULL: return true;

@@ -146,6 +146,13 @@ struct fh_upval_def {
 #define fh_make_integer fh_new_integer
 #define fh_make_c_func fh_new_c_func
 
+int fh_arg_int32(struct fh_program *prog, const struct fh_value *v, const char *fn, int arg_index_0_based,
+                 int32_t *out);
+
+int fh_arg_double(struct fh_program *prog, const struct fh_value *v, const char *fn, int arg_index_0_based,
+                  double *out);
+
+
 double fh_optnumber(struct fh_value *args, int n_args, int check, double opt);
 
 int64_t fh_optinteger(struct fh_value *args, int n_args, int check, int64_t opt);

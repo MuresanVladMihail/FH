@@ -171,6 +171,18 @@ void fh_collect_garbage(struct fh_program *prog);
 
 int64_t fh_as_i64(struct fh_program *prog, const struct fh_value *v, const char *fn);
 
+#define FH_REQUIRE_MIN_ARGS(prog, fname, n_min, n_args) \
+do { \
+if ((n_args) < (n_min)) \
+return fh_set_error((prog), "%s: expected at least %d argument(s), got %d", (fname), (n_min), (n_args)); \
+} while (0)
+
+#define FH_REQUIRE_EXACT_ARGS(prog, fname, n_exp, n_args) \
+do { \
+if ((n_args) != (n_exp)) \
+return fh_set_error((prog), "%s: expected %d argument(s), got %d", (fname), (n_exp), (n_args)); \
+} while (0)
+
 #define fh_is_null(v)                   ((v)->type == FH_VAL_NULL)
 #define fh_is_bool(v)                   ((v)->type == FH_VAL_BOOL)
 #define fh_is_number(v)                 ((v)->type == FH_VAL_FLOAT)

@@ -26,18 +26,6 @@
 #define FLT_EPSILON 1E-6
 #endif
 
-#define REQUIRE_MIN_ARGS(prog, fname, n_min, n_args) \
-do { \
-if ((n_args) < (n_min)) \
-return fh_set_error((prog), "%s: expected at least %d argument(s), got %d", (fname), (n_min), (n_args)); \
-} while (0)
-
-#define REQUIRE_EXACT_ARGS(prog, fname, n_exp, n_args) \
-do { \
-if ((n_args) != (n_exp)) \
-return fh_set_error((prog), "%s: expected %d argument(s), got %d", (fname), (n_exp), (n_args)); \
-} while (0)
-
 #define DEG_TO_RAD(angleInDegrees) ((angleInDegrees) * M_PI / 180.0)
 #define RAD_TO_DEG(angleInRadians) ((angleInRadians) * 180.0 / M_PI)
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
@@ -126,55 +114,6 @@ gettimeofday(struct timeval *tp, struct timezone *tzp) {
 #define S_IFDIR 0040000 /* directory */
 #endif
 
-static int fh_arg_int32(struct fh_program *prog, const struct fh_value *v, const char *fn, int arg_index_0_based,
-                        int32_t *out) {
-    if (!fh_is_number_or_integer(v)) {
-        return fh_set_error(prog, "%s: expected number/integer for argument %d, got %s",
-                            fn, arg_index_0_based + 1, fh_type_to_str(prog, v->type));
-    }
-
-    if (fh_is_integer(v)) {
-        const int64_t x = v->data.i;
-        if (x < INT32_MIN || x > INT32_MAX) {
-            return fh_set_error(prog, "%s: argument %d out of int32 range", fn, arg_index_0_based + 1);
-        }
-        *out = (int32_t) x;
-        return 0;
-    }
-
-    const double d = fh_get_number((struct fh_value*)v);
-    if (!isfinite(d)) {
-        return fh_set_error(prog, "%s: argument %d must be finite", fn, arg_index_0_based + 1);
-    }
-    if (d < (double) INT32_MIN || d > (double) INT32_MAX) {
-        return fh_set_error(prog, "%s: argument %d out of int32 range", fn, arg_index_0_based + 1);
-    }
-    if (trunc(d) != d) {
-        return fh_set_error(prog, "%s: argument %d must be an integer value", fn, arg_index_0_based + 1);
-    }
-
-    *out = (int32_t) d;
-    return 0;
-}
-
-static int fh_arg_double(struct fh_program *prog, const struct fh_value *v, const char *fn, int arg_index_0_based,
-                         double *out) {
-    if (fh_is_number(v)) {
-        const double d = v->data.num;
-        if (!isfinite(d)) {
-            return fh_set_error(prog, "%s: argument %d must be finite", fn, arg_index_0_based + 1);
-        }
-        *out = d;
-        return 0;
-    }
-    if (fh_is_integer(v)) {
-        *out = (double) v->data.i;
-        return 0;
-    }
-    return fh_set_error(prog, "%s: expected number/integer for argument %d, got %s", fn, arg_index_0_based + 1,
-                        fh_type_to_str(prog, v->type));
-}
-
 static void print_value(struct fh_value *val) {
     if (val->type == FH_VAL_UPVAL)
         val = GET_OBJ_UPVAL(val->data.obj)->val;
@@ -262,7 +201,7 @@ static int check_n_args(struct fh_program *prog, const char *func_name, int n_ex
 
 /*********** Math functions ***********/
 static int fn_math_md5(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "math_md5()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "math_md5()", 1, n_args);
 
     const char *key = fh_get_string(&args[0]);
     uint8_t *res_i = md5String((char *) key);
@@ -293,7 +232,7 @@ static int fn_math_md5(struct fh_program *prog, struct fh_value *ret, struct fh_
 }
 
 static int fn_math_bcrypt_gen_salt(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "math_bcrypt_gen_salt()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "math_bcrypt_gen_salt()", 1, n_args);
 
     char salt[BCRYPT_HASHSIZE];
 
@@ -340,7 +279,7 @@ static int fn_math_bcrypt_hashpw(struct fh_program *prog, struct fh_value *ret, 
 }
 
 static int fn_math_abs(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "math_abs()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "math_abs()", 1, n_args);
 
     if (fh_is_number(&args[0])) {
         *ret = fh_make_number(fabs(args[0].data.num));
@@ -358,7 +297,7 @@ static int fn_math_abs(struct fh_program *prog, struct fh_value *ret, struct fh_
 }
 
 static int fn_math_acos(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "math_acos()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "math_acos()", 1, n_args);
 
     double x;
     if (fh_arg_double(prog, &args[0], "math_acos()", 0, &x) < 0) return -1;
@@ -368,7 +307,7 @@ static int fn_math_acos(struct fh_program *prog, struct fh_value *ret, struct fh
 }
 
 static int fn_math_asin(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "math_asin()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "math_asin()", 1, n_args);
 
     double x;
     if (fh_arg_double(prog, &args[0], "math_asin()", 0, &x) < 0) return -1;
@@ -378,7 +317,7 @@ static int fn_math_asin(struct fh_program *prog, struct fh_value *ret, struct fh
 }
 
 static int fn_math_atan(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "math_atan()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "math_atan()", 1, n_args);
 
     double x;
     if (fh_arg_double(prog, &args[0], "math_atan()", 0, &x) < 0) return -1;
@@ -388,7 +327,7 @@ static int fn_math_atan(struct fh_program *prog, struct fh_value *ret, struct fh
 }
 
 static int fn_math_cos(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "math_cos()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "math_cos()", 1, n_args);
     double x;
     if (fh_arg_double(prog, &args[0], "math_cos()", 0, &x) < 0) return -1;
     *ret = fh_make_number(cos(x));
@@ -396,7 +335,7 @@ static int fn_math_cos(struct fh_program *prog, struct fh_value *ret, struct fh_
 }
 
 static int fn_math_cosh(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "math_cosh()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "math_cosh()", 1, n_args);
     double x;
     if (fh_arg_double(prog, &args[0], "math_cosh()", 0, &x) < 0) return -1;
     *ret = fh_make_number(cosh(x));
@@ -404,7 +343,7 @@ static int fn_math_cosh(struct fh_program *prog, struct fh_value *ret, struct fh
 }
 
 static int fn_math_exp(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "math_exp()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "math_exp()", 1, n_args);
     double x;
     if (fh_arg_double(prog, &args[0], "math_exp()", 0, &x) < 0) return -1;
     *ret = fh_make_number(exp(x));
@@ -412,7 +351,7 @@ static int fn_math_exp(struct fh_program *prog, struct fh_value *ret, struct fh_
 }
 
 static int fn_math_log(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "math_log()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "math_log()", 1, n_args);
     double x;
     if (fh_arg_double(prog, &args[0], "math_log()", 0, &x) < 0) return -1;
     *ret = fh_make_number(log(x));
@@ -420,7 +359,7 @@ static int fn_math_log(struct fh_program *prog, struct fh_value *ret, struct fh_
 }
 
 static int fn_math_log10(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "math_log10()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "math_log10()", 1, n_args);
     double x;
     if (fh_arg_double(prog, &args[0], "math_log10()", 0, &x) < 0) return -1;
     *ret = fh_make_number(log10(x));
@@ -428,7 +367,7 @@ static int fn_math_log10(struct fh_program *prog, struct fh_value *ret, struct f
 }
 
 static int fn_math_deg(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "math_deg()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "math_deg()", 1, n_args);
     double x;
     if (fh_arg_double(prog, &args[0], "math_deg()", 0, &x) < 0) return -1;
     *ret = fh_make_number(RAD_TO_DEG(x));
@@ -436,7 +375,7 @@ static int fn_math_deg(struct fh_program *prog, struct fh_value *ret, struct fh_
 }
 
 static int fn_math_rad(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "math_rad()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "math_rad()", 1, n_args);
     double x;
     if (fh_arg_double(prog, &args[0], "math_rad()", 0, &x) < 0) return -1;
     *ret = fh_make_number(DEG_TO_RAD(x));
@@ -458,7 +397,7 @@ static int fn_math_atan2(struct fh_program *prog, struct fh_value *ret, struct f
 }
 
 static int fn_math_ceil(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "math_ceil()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "math_ceil()", 1, n_args);
 
     if (fh_is_integer(&args[0])) {
         *ret = fh_make_integer(args[0].data.i);
@@ -472,7 +411,7 @@ static int fn_math_ceil(struct fh_program *prog, struct fh_value *ret, struct fh
 }
 
 static int fn_math_floor(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "math_floor()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "math_floor()", 1, n_args);
 
     if (fh_is_integer(&args[0])) {
         *ret = fh_make_integer(args[0].data.i);
@@ -537,7 +476,7 @@ static int fn_math_huge(struct fh_program *prog, struct fh_value *ret, struct fh
 }
 
 static int fn_math_ldexp(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "math_ldexp()", 2, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "math_ldexp()", 2, n_args);
 
     if (!fh_is_number(&args[0])) {
         return fh_set_error(prog, "math_ldexp(): expected number as first argument");
@@ -550,54 +489,38 @@ static int fn_math_ldexp(struct fh_program *prog, struct fh_value *ret, struct f
     return 0;
 }
 
-static int fn_math_log(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    const struct fh_value arg1 = args[0];
-    if (fh_is_number(&arg1)) {
-        *ret = fh_make_number(log(arg1.data.num));
-    } else if (fh_is_integer(&arg1)) {
-        *ret = fh_make_integer(logl(arg1.data.i));
-    } else {
-        return fh_set_error(prog, "math_log(): expected number/integer, got %s", fh_type_to_str(prog, arg1.type));
-    }
-    return 0;
-}
-
-static int fn_math_log10(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    const struct fh_value arg1 = args[0];
-    if (fh_is_number(&arg1)) {
-        *ret = fh_make_number(log10(arg1.data.num));
-    } else if (fh_is_integer(&arg1)) {
-        *ret = fh_make_integer(log10l(arg1.data.i));
-    } else {
-        return fh_set_error(prog, "math_log10(): expected number/integer, got %s", fh_type_to_str(prog, arg1.type));
-    }
-    return 0;
-}
-
 static int fn_math_clamp(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (check_n_args(prog, "math_clamp()", 3, n_args))
-        return -1;
+    FH_REQUIRE_EXACT_ARGS(prog, "math_clamp()", 3, n_args);
 
-    if (!fh_is_number(&args[0]) || !fh_is_number(&args[1]) || !fh_is_number(&args[2]))
-        return fh_set_error(prog, "math_clamp(): expected 3 numbers");
+    if (!fh_is_number_or_integer(&args[0]) || !fh_is_number_or_integer(&args[1]) || !fh_is_number_or_integer(&args[2]))
+        return fh_set_error(prog, "math_clamp(): expected 3 numbers|integers");
 
-    double a = fh_get_number(&args[0]);
-    double x = fh_get_number(&args[1]);
-    double y = fh_get_number(&args[2]);
+    double a;
+    if (fh_arg_double(prog, &args[0], "math_clamp()", 0, &a) < 0) return -1;
+    double x;
+    if (fh_arg_double(prog, &args[1], "math_clamp()", 1, &x) < 0) return -1;
+    double y;
+    if (fh_arg_double(prog, &args[2], "math_clamp()", 2, &y) < 0) return -1;
+
     *ret = fh_new_number(MAX(x, MIN(y, a)));
     return 0;
 }
 
 static int fn_math_max(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (check_n_args(prog, "math_max()", 2, n_args))
-        return -1;
+    FH_REQUIRE_EXACT_ARGS(prog, "math_max()", 2, n_args);
 
-    if (!fh_is_number(&args[0]) || !fh_is_number(&args[1])) {
-        return fh_set_error(prog, "math_max(): expected number, got %s and %s", fh_type_to_str(prog, args[0].type),
-                            fh_type_to_str(prog, args[1].type));
+
+    if (!fh_is_number_or_integer(&args[0]) || !fh_is_number_or_integer(&args[1])) {
+        return fh_set_error(prog, "math_max(): expected number|integer, got %s and %s",
+                            fh_type_to_str(prog, args[0].type), fh_type_to_str(prog, args[1].type));
     }
 
-    *ret = fh_make_number(MAX(args[0].data.num, args[1].data.num));
+    double x;
+    if (fh_arg_double(prog, &args[0], "math_max()", 0, &x) < 0) return -1;
+    double y;
+    if (fh_arg_double(prog, &args[1], "math_max()", 1, &y) < 0) return -1;
+
+    *ret = fh_make_number(MAX(x, y));
     return 0;
 }
 
@@ -747,62 +670,42 @@ static int fn_math_randomseed(struct fh_program *prog, struct fh_value *ret, str
 }
 
 static int fn_math_sin(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (check_n_args(prog, "math_sin()", 1, n_args))
-        return -1;
-
-    if (!fh_is_number(&args[0])) {
-        return fh_set_error(prog, "math_sin(): expected number, got %s", fh_type_to_str(prog, args[0].type));
-    }
-
-    *ret = fh_make_number(sin(args[0].data.num));
+    FH_REQUIRE_EXACT_ARGS(prog, "math_sin()", 1, n_args);
+    double x;
+    if (fh_arg_double(prog, &args[0], "math_sin()", 0, &x) < 0) return -1;
+    *ret = fh_make_number(sin(x));
     return 0;
 }
 
 static int fn_math_sinh(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (check_n_args(prog, "math_sinh()", 1, n_args))
-        return -1;
-
-    if (!fh_is_number(&args[0])) {
-        return fh_set_error(prog, "math_sinh(): expected number, got %s", fh_type_to_str(prog, args[0].type));
-    }
-
-    *ret = fh_make_number(sinh(args[0].data.num));
+    FH_REQUIRE_EXACT_ARGS(prog, "math_sinh()", 1, n_args);
+    double x;
+    if (fh_arg_double(prog, &args[0], "math_sinh()", 0, &x) < 0) return -1;
+    *ret = fh_make_number(sinh(x));
     return 0;
 }
 
 static int fn_math_sqrt(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (check_n_args(prog, "math_sqrt()", 1, n_args))
-        return -1;
-
-    if (!fh_is_number(&args[0])) {
-        return fh_set_error(prog, "math_sqrt(): expected number, got %s", fh_type_to_str(prog, args[0].type));
-    }
-
-    *ret = fh_make_number(sqrt(args[0].data.num));
+    FH_REQUIRE_EXACT_ARGS(prog, "math_sqrt()", 1, n_args);
+    double x;
+    if (fh_arg_double(prog, &args[0], "math_sqrt()", 0, &x) < 0) return -1;
+    *ret = fh_make_number(sqrt(x));
     return 0;
 }
 
 static int fn_math_tan(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (check_n_args(prog, "math_tan()", 1, n_args))
-        return -1;
-
-    if (!fh_is_number(&args[0])) {
-        return fh_set_error(prog, "math_tan(): expected number, got %s", fh_type_to_str(prog, args[0].type));
-    }
-
-    *ret = fh_make_number(tan(args[0].data.num));
+    FH_REQUIRE_EXACT_ARGS(prog, "math_tan()", 1, n_args);
+    double x;
+    if (fh_arg_double(prog, &args[0], "math_tan()", 0, &x) < 0) return -1;
+    *ret = fh_make_number(tan(x));
     return 0;
 }
 
 static int fn_math_tanh(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (check_n_args(prog, "math_tanh()", 1, n_args))
-        return -1;
-
-    if (!fh_is_number(&args[0])) {
-        return fh_set_error(prog, "math_tanh(): expected number, got %s", fh_type_to_str(prog, args[0].type));
-    }
-
-    *ret = fh_make_number(tanh(args[0].data.num));
+    FH_REQUIRE_EXACT_ARGS(prog, "math_tanh()", 1, n_args);
+    double x;
+    if (fh_arg_double(prog, &args[0], "math_tanh()", 0, &x) < 0) return -1;
+    *ret = fh_make_number(tanh(x));
     return 0;
 }
 
@@ -879,7 +782,7 @@ static int fn_io_tar_read(struct fh_program *prog, struct fh_value *ret, struct 
 }
 
 static int fn_io_tar_list(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "io_tar_list()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "io_tar_list()", 1, n_args);
 
     if (!fh_is_c_obj_of_type(&args[0], FH_IO_TAR_STRUCT_ID)) {
         return fh_set_error(prog, "Expected tar object as first argument");
@@ -903,7 +806,7 @@ static int fn_io_tar_list(struct fh_program *prog, struct fh_value *ret, struct 
 }
 
 static int fn_io_tar_write_header(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "io_tar_write_header()", 3, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "io_tar_write_header()", 3, n_args);
 
     if (!fh_is_c_obj_of_type(&args[0], FH_IO_TAR_STRUCT_ID))
         return fh_set_error(prog, "Expected tar object as first argument");
@@ -923,7 +826,7 @@ static int fn_io_tar_write_header(struct fh_program *prog, struct fh_value *ret,
 }
 
 static int fn_io_tar_write_data(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "io_tar_write_data()", 2, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "io_tar_write_data()", 2, n_args);
 
     if (!fh_is_c_obj_of_type(&args[0], FH_IO_TAR_STRUCT_ID))
         return fh_set_error(prog, "Expected tar object as first argument");
@@ -1032,6 +935,9 @@ char *scan_line(char *line) {
 
 
 static int fn_io_scan_line(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    UNUSED(args);
+    FH_REQUIRE_EXACT_ARGS(prog, "io_scan_line()", 0, n_args);
+
     char *line = NULL;
     line = scan_line(line);
 
@@ -1074,7 +980,7 @@ static int fn_io_read(struct fh_program *prog, struct fh_value *ret, struct fh_v
         return 0;
     }
 
-    REQUIRE_EXACT_ARGS(prog, "io_read()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "io_read()", 1, n_args);
 
     if (!fh_is_c_obj(&args[0]) || fh_get_c_obj(&args[0])->type != FH_IO_STRUCT_ID)
         return fh_set_error(prog, "io_read(): expected IO handler");
@@ -1191,7 +1097,8 @@ static int fn_io_seek(struct fh_program *prog, struct fh_value *ret, struct fh_v
 
 static int fn_io_remove(struct fh_program *prog,
                         struct fh_value *ret, struct fh_value *args, int n_args) {
-    UNUSED(n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "io_remove()", 1, n_args);
+
     if (!fh_is_string(&args[0]))
         return fh_set_error(prog, "Illegal parameter, expected filename:string");
     const char *filename = fh_get_string(&args[0]);
@@ -1206,7 +1113,8 @@ static int fn_io_remove(struct fh_program *prog,
 
 static int fn_io_rename(struct fh_program *prog,
                         struct fh_value *ret, struct fh_value *args, int n_args) {
-    UNUSED(n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "io_rename()", 2, n_args);
+
     if (!fh_is_string(&args[0]) || !fh_is_string(&args[1]))
         return fh_set_error(prog, "Illegal parameter, expected old_filename:string and new_filename:string");
     const char *old_filename = fh_get_string(&args[0]);
@@ -1222,7 +1130,8 @@ static int fn_io_rename(struct fh_program *prog,
 
 static int fn_io_mkdir(struct fh_program *prog, struct fh_value *ret,
                        struct fh_value *args, int n_args) {
-    UNUSED(n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "io_mkdir()", 1, n_args);
+
     if (!fh_is_string(&args[0]))
         return fh_set_error(prog, "Illegal parameter, expected string");
 
@@ -1238,7 +1147,8 @@ static int fn_io_mkdir(struct fh_program *prog, struct fh_value *ret,
 }
 
 static int fn_io_filetype(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    UNUSED(n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "io_filetype()", 1, n_args);
+
     if (!fh_is_string(&args[0]))
         return fh_set_error(prog, "Illegal parameter, expected string");
 
@@ -1280,10 +1190,7 @@ static int fn_io_filetype(struct fh_program *prog, struct fh_value *ret, struct 
 /*********** End I/O functions ***********/
 
 /*********** String functions ***********/
-static struct fh_value fh_new_string_slice_local(struct fh_program *prog,
-                                                 const char *src,
-                                                 size_t off,
-                                                 size_t n) {
+static struct fh_value fh_new_string_slice_local(struct fh_program *prog, const char *src, size_t off, size_t n) {
     char *buf = (char *) malloc(n + 1);
     if (!buf) {
         return fh_new_null();
@@ -1300,21 +1207,18 @@ static struct fh_value fh_new_string_slice_local(struct fh_program *prog,
 static int fn_string_slice(struct fh_program *prog, struct fh_value *ret,
                            struct fh_value *args, int n_args) {
     if (n_args != 2 && n_args != 3)
-        return fh_set_error(prog, "slice() expects 2 or 3 arguments");
+        return fh_set_error(prog, "string_slice() expects 2 or 3 arguments");
 
-    if (!fh_is_string(&args[0]) || !fh_is_number(&args[1]) ||
-        (n_args == 3 && !fh_is_number(&args[2])))
-        return fh_set_error(prog, "slice() expects (string, number[, number])");
+    if (!fh_is_string(&args[0]) || !fh_is_integer(&args[1]) || (n_args == 3 && !fh_is_integer(&args[2])))
+        return fh_set_error(prog, "string_slice() expects (string, number[, number])");
 
     const char *s = fh_get_string(&args[0]);
     const size_t len = strlen(s);
 
     int32_t start_i32;
-    if (fh_arg_int32(prog, &args[1], "slice()", 1, &start_i32) < 0) return -1;
-    const int start_i = (int) start_i32;
-    if (start_i < 0) return fh_set_error(prog, "Start index out of bounds!");
-    const size_t start = (size_t) start_i;
-    if (start > len) return fh_set_error(prog, "Start index out of bounds!");
+    if (fh_arg_int32(prog, &args[1], "string_slice()", 1, &start_i32) < 0) return -1;
+    if (start_i32 < 0) return fh_set_error(prog, "Start index out of bounds!");
+    if (start_i32 > len) return fh_set_error(prog, "Start index out of bounds!");
 
     size_t end = len;
     if (n_args == 3) {
@@ -1323,7 +1227,7 @@ static int fn_string_slice(struct fh_program *prog, struct fh_value *ret,
         const int end_i = (int) end_i32;
         if (end_i < 0) return fh_set_error(prog, "Invalid end index value");
         end = (size_t) end_i;
-        if (end < start || end > len)
+        if (end < start_i32 || end > len)
             return fh_set_error(prog, "Invalid end index value");
     }
 
@@ -1338,16 +1242,16 @@ static int fn_string_slice(struct fh_program *prog, struct fh_value *ret,
     const struct fh_array *a = GET_VAL_ARRAY(&out);
 
     // prefix: [0..start)
-    a->items[0] = fh_new_string_slice_local(prog, s, 0, start);
+    a->items[0] = fh_new_string_slice_local(prog, s, 0, start_i32);
     if (a->items[0].type == FH_VAL_NULL) return fh_set_error(prog, "out of memory");
 
     if (n_args == 2) {
         // suffix: [start..len)
-        a->items[1] = fh_new_string_slice_local(prog, s, start, len - start);
+        a->items[1] = fh_new_string_slice_local(prog, s, start_i32, len - start_i32);
         if (a->items[1].type == FH_VAL_NULL) return fh_set_error(prog, "out of memory");
     } else {
         // middle: [start..end)
-        a->items[1] = fh_new_string_slice_local(prog, s, start, end - start);
+        a->items[1] = fh_new_string_slice_local(prog, s, start_i32, end - start_i32);
         if (a->items[1].type == FH_VAL_NULL) return fh_set_error(prog, "out of memory");
 
         // suffix: [end..len)
@@ -1492,11 +1396,8 @@ static int fn_string_find(struct fh_program *prog, struct fh_value *ret, struct 
     const char *str = GET_VAL_STRING_DATA(&args[0]);
     const char *find = GET_VAL_STRING_DATA(&args[1]);
 
-    char *r = strstr(str, find);
-    if (r)
-        *ret = fh_new_number((int)(r - str));
-    else
-        *ret = fh_new_number(-1);
+    const char *r = strstr(str, find);
+    *ret = fh_new_integer(r ? (int)(r - str) : -1);
     return 0;
 }
 
@@ -1559,8 +1460,9 @@ static int fn_string_substr(struct fh_program *prog, struct fh_value *ret, struc
     if (check_n_args(prog, "string_substr()", 3, n_args))
         return -1;
 
-    if (!fh_is_string(&args[0]) || !fh_is_number(&args[1]) || !fh_is_number(&args[2]))
-        return fh_set_error(prog, "expected string values, got: %s %s and %s", fh_type_to_str(prog, args[0].type),
+    if (!fh_is_string(&args[0]) || !fh_is_integer(&args[1]) || !fh_is_integer(&args[2]))
+        return fh_set_error(prog, "expected string, integer and integer values, got: %s %s and %s",
+                            fh_type_to_str(prog, args[0].type),
                             fh_type_to_str(prog, args[1].type), fh_type_to_str(prog, args[2].type));
 
     const char *str = GET_VAL_STRING_DATA(&args[0]);
@@ -1643,8 +1545,8 @@ static int fn_string_char(struct fh_program *prog, struct fh_value *ret, struct 
 
     if (fh_is_string(&args[0])) {
         const char *c = GET_VAL_STRING_DATA(&args[0]);
-        *ret = fh_new_number(*c - '0');
-    } else if (fh_is_number(&args[0])) {
+        *ret = fh_new_integer(*c - '0');
+    } else if (fh_is_integer(&args[0])) {
         int32_t d32;
         if (fh_arg_int32(prog, &args[0], "string_char()", 0, &d32) < 0) return -1;
         const int c = (int) d32 + '0';
@@ -1653,7 +1555,7 @@ static int fn_string_char(struct fh_program *prog, struct fh_value *ret, struct 
 
         *ret = fh_new_string(prog, ret_str);
     } else
-        return fh_set_error(prog, "expected string or number value, got: %s", fh_type_to_str(prog, args[0].type));
+        return fh_set_error(prog, "expected string or integer value, got: %s", fh_type_to_str(prog, args[0].type));
 
     return 0;
 }
@@ -1771,7 +1673,7 @@ static inline size_t trimwhitespace(char *out, const size_t len, const char *str
 }
 
 static int fn_string_trim(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_MIN_ARGS(prog, "string_trim()", 1, n_args);
+    FH_REQUIRE_MIN_ARGS(prog, "string_trim()", 1, n_args);
 
     if (!fh_is_string(&args[0]))
         return fh_set_error(prog, "expected string value, got: %s", fh_type_to_str(prog, args[0].type));
@@ -1802,11 +1704,12 @@ static fh_c_obj_gc_callback os_time_gc(struct timeval *t) {
 }
 
 static int fn_os_time(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    UNUSED(prog);
     UNUSED(args);
-    UNUSED(n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "os_time()", 0, n_args);
 
     struct timeval *t = malloc(sizeof(struct timeval));
+    if (!t) return fh_set_error(prog, "os_time(): out of memory");
+
     gettimeofday(t, NULL);
     *ret = fh_new_c_obj(prog, t, (fh_c_obj_gc_callback) os_time_gc, FH_TIME_STRUCT_ID);
     return 0;
@@ -1826,9 +1729,8 @@ static int fn_os_difftime(struct fh_program *prog, struct fh_value *ret, struct 
 }
 
 static int fn_os_localtime(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    UNUSED(prog);
     UNUSED(args);
-    UNUSED(n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "os_localtime()", 0, n_args);
 
     time_t rawtime;
     struct tm *timeinfo;
@@ -1879,8 +1781,7 @@ static int fn_os_getOS(struct fh_program *prog, struct fh_value *ret, struct fh_
 /*********** End OS functions ***********/
 static int fn_getversion(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
     UNUSED(args);
-    if (check_n_args(prog, "getversion()", 0, n_args))
-        return -1;
+    FH_REQUIRE_EXACT_ARGS(prog, "getversion()", 0, n_args);
 
     *ret = fh_new_string(prog, FH_VERSION);
     return 0;
@@ -1894,6 +1795,7 @@ static int fn_tostring(struct fh_program *prog, struct fh_value *ret,
         return fh_set_error(prog, "tostring(): expected number/integer");
 
     if (fh_is_integer(&args[0])) {
+        printf("Converting integer to string\n");
         int needed = snprintf(NULL, 0, "%lld", (long long)args[0].data.i);
         char *buf = malloc((size_t) needed + 1);
         if (!buf) return fh_set_error(prog, "tostring(): out of memory");
@@ -1976,7 +1878,7 @@ static int fn_gc(struct fh_program *prog, struct fh_value *ret, struct fh_value 
 }
 
 static int fn_gc_frequency(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "gc_frequency()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "gc_frequency()", 1, n_args);
 
     if (!fh_is_number_or_integer(&args[0]))
         return fh_set_error(prog, "gc_frequency(): expected number/integer");
@@ -1991,7 +1893,7 @@ static int fn_gc_frequency(struct fh_program *prog, struct fh_value *ret, struct
 }
 
 static int fn_gc_pause(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    REQUIRE_EXACT_ARGS(prog, "gc_pause()", 1, n_args);
+    FH_REQUIRE_EXACT_ARGS(prog, "gc_pause()", 1, n_args);
     if (!fh_is_bool(&args[0]))
         return fh_set_error(prog, "gc_pause(): expected boolean");
     prog->gc_isPaused = fh_get_bool(&args[0]);
@@ -2053,7 +1955,7 @@ static int fn_has(struct fh_program *prog, struct fh_value *ret, struct fh_value
             struct fh_value v = arr->items[i];
             if (fh_vals_are_equal(&args[1], &v)) {
                 ret_arr->items[0] = v;
-                ret_arr->items[1] = fh_new_number(i);
+                ret_arr->items[1] = fh_new_integer(i);
                 new_val.data.obj = ret_arr;
 
                 *ret = new_val;
@@ -2071,7 +1973,7 @@ static int fn_has(struct fh_program *prog, struct fh_value *ret, struct fh_value
             struct fh_map_entry *e = &map->entries[i];
             if (fh_vals_are_equal(&args[1], &e->key)) {
                 ret_arr->items[0] = e->val;
-                ret_arr->items[1] = fh_new_number(i);
+                ret_arr->items[1] = fh_new_integer(i);
                 new_val.data.obj = ret_arr;
 
                 *ret = new_val;

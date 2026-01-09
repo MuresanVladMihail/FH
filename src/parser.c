@@ -619,28 +619,18 @@ static struct fh_p_expr *parse_expr(struct fh_parser *p, bool consume_stop, char
             continue;
         }
         /* number or integer */
-        if (tok_is_number(&tok)) {
+        if (tok_is_number(&tok) || tok_is_integer(&tok)) {
             if (!expect_opn) {
                 fh_parse_error_expected(p, tok.loc, "'(' or operator");
                 goto err;
             }
 
-            if (get_token(p, &tok) < 0)
-                goto err;
-
-            bool is_int = true;
-            if (tok_is_punct(&tok, '.')) {
-                is_int = false;
-            } else {
-                unget_token(p, &tok);
-            }
-
             struct fh_p_expr *num;
-            if (is_int) {
+            if (tok_is_integer(&tok)) {
                 num = new_expr(p, tok.loc, EXPR_INTEGER, 0);
                 if (!num)
                     goto err;
-                num->data.i = (int64_t) tok.data.num;
+                num->data.i = tok.data.i;
             } else {
                 num = new_expr(p, tok.loc, EXPR_FLOAT, 0);
                 if (!num)
