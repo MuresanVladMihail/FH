@@ -209,6 +209,18 @@ int fh_set_verror(struct fh_program *prog, const char *fmt, va_list ap) {
     return -1;
 }
 
+int64_t fh_as_i64(struct fh_program *prog, const struct fh_value *v, const char *fn) {
+    if (v->type == FH_VAL_INTEGER) return v->data.i;
+    if (v->type == FH_VAL_FLOAT) {
+        const double d = v->data.num;
+        if (!isfinite(d) || d < (double) INT64_MIN || d > (double) INT64_MAX) {
+            return fh_set_error(prog, "%s: number out of int64 range", fn);
+        }
+        return (int64_t) d;
+    }
+    return fh_set_error(prog, "%s: expected number/integer", fn);
+}
+
 int fh_get_pin_state(struct fh_program *prog) {
     // return p_object_stack_size(&prog->pinned_objs);
     return prog->pinned_objs.length;

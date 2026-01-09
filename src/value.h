@@ -143,9 +143,13 @@ struct fh_upval_def {
 #define fh_make_null   fh_new_null
 #define fh_make_bool   fh_new_bool
 #define fh_make_number fh_new_number
+#define fh_make_integer fh_new_integer
 #define fh_make_c_func fh_new_c_func
 
 double fh_optnumber(struct fh_value *args, int n_args, int check, double opt);
+
+int64_t fh_optinteger(struct fh_value *args, int n_args, int check, int64_t opt);
+
 
 bool fh_optboolean(struct fh_value *args, int n_args, int check, bool opt);
 

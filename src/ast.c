@@ -114,6 +114,7 @@ void fh_free_expr_children(struct fh_p_expr *expr) {
         case EXPR_NULL:
         case EXPR_BOOL:
         case EXPR_FLOAT:
+        case EXPR_INTEGER:
         case EXPR_STRING:
             return;
 
@@ -172,7 +173,7 @@ void fh_free_expr_list(struct fh_p_expr *list) {
     }
 }
 
-void fh_free_stmt_children(struct fh_p_stmt *stmt) {
+void fh_free_stmt_children(const struct fh_p_stmt *stmt) {
     switch (stmt->type) {
         case STMT_NONE:
         case STMT_EMPTY:
@@ -270,6 +271,7 @@ int fh_ast_visit_expr_nodes(struct fh_p_expr *expr, int (*visit)(struct fh_p_exp
         case EXPR_NULL:
         case EXPR_BOOL:
         case EXPR_FLOAT:
+        case EXPR_INTEGER:
         case EXPR_STRING:
         case EXPR_FUNC:
             return 0;

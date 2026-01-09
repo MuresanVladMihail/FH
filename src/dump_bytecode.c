@@ -291,6 +291,7 @@ static void dump_const(struct fh_program *prog, struct fh_value *c) {
             return;
         case FH_VAL_FLOAT: printf("%f\n", c->data.num);
             return;
+        case FH_VAL_INTEGER: printf("%lld\n", c->data.i);
         case FH_VAL_STRING: dump_string(fh_get_string(c));
             printf("\n");
             return;

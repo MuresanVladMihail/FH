@@ -327,7 +327,7 @@ int fh_read_token(struct fh_tokenizer *t, struct fh_token *tok) {
         }
 
         char *end = NULL;
-        double num = strtod(t->tmp->p, &end);
+        const double num = strtod(t->tmp->p, &end);
         if (t->tmp->p == end) {
             set_error(t, tok->loc, "invalid number");
             return -1;

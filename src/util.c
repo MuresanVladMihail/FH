@@ -186,6 +186,8 @@ void fh_dump_value(const struct fh_value *val) {
 			return;
 		case FH_VAL_FLOAT: printf("NUMBER(%f)", val->data.num);
 			return;
+		case FH_VAL_INTEGER: printf("NUMBER(%lld)", val->data.i);
+			return;
 		case FH_VAL_STRING: printf("STRING(");
 			fh_dump_string(fh_get_string(val));
 			printf(")");

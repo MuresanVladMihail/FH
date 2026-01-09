@@ -57,6 +57,8 @@ static inline uint32_t val_hash_pow2(const struct fh_value *val, uint32_t cap) {
             else h = fh_hash(&val->data.num, sizeof(double));
             break;
         }
+        case FH_VAL_INTEGER: h = hash_i32((uint32_t) val->data.i);
+            break;
         case FH_VAL_C_FUNC: h = fh_hash(&val->data.c_func, sizeof(fh_c_func));
             break;
         default: h = fh_hash(&val->data.obj, sizeof(void *));
@@ -74,6 +76,18 @@ static inline uint32_t find_slot_num(const struct fh_map_entry *entries, const u
 
     while (OCCUPIED(&entries[idx])) {
         if (entries[idx].key.type == FH_VAL_FLOAT && entries[idx].key.data.num == key_num)
+            return idx;
+        idx = (idx + 1) & (cap - 1);
+    }
+    return idx;
+}
+
+static inline uint64_t
+find_slot_integer(const struct fh_map_entry *entries, const uint32_t cap, const int64_t key_num) {
+    uint32_t idx = hash_i32(key_num) & (cap - 1);
+
+    while (OCCUPIED(&entries[idx])) {
+        if (entries[idx].key.type == FH_VAL_INTEGER && entries[idx].key.data.i == key_num)
             return idx;
         idx = (idx + 1) & (cap - 1);
     }
@@ -155,6 +169,8 @@ int fh_add_map_object_entry(struct fh_program *prog, struct fh_map *map,
     uint32_t i;
     if (key->type == FH_VAL_FLOAT) {
         i = find_slot_num(map->entries, map->cap, key->data.num);
+    } else if (key->type == FH_VAL_INTEGER) {
+        i = find_slot_integer(map->entries, map->cap, key->data.i);
     } else {
         i = find_slot_generic(map->entries, map->cap, key);
     }

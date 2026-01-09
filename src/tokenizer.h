@@ -36,6 +36,7 @@ enum fh_keyword_type {
 struct fh_token {
     enum fh_token_type type;
     struct fh_src_loc loc;
+
     union {
         double num;
         fh_string_id str;
@@ -65,13 +66,21 @@ struct fh_tokenizer {
     struct fh_src_loc saved_loc;
 };
 
-struct fh_tokenizer *fh_new_tokenizer(struct fh_program *prog, struct fh_input *in, struct fh_ast *ast, struct fh_buffer *tmp_buf, uint16_t file_id);
+struct fh_tokenizer *fh_new_tokenizer(struct fh_program *prog, struct fh_input *in, struct fh_ast *ast,
+                                      struct fh_buffer *tmp_buf, uint16_t file_id);
+
 void fh_free_tokenizer(struct fh_tokenizer *t);
+
 int fh_read_token(struct fh_tokenizer *t, struct fh_token *tok);
+
 struct fh_src_loc fh_get_tokenizer_error_loc(struct fh_tokenizer *t);
+
 const char *fh_get_token_keyword(struct fh_token *tok);
+
 const char *fh_get_token_symbol(struct fh_ast *ast, struct fh_token *tok);
+
 const char *fh_get_token_string(struct fh_ast *ast, struct fh_token *tok);
+
 const char *fh_get_token_op(struct fh_token *tok);
 
 const char *fh_dump_token(struct fh_ast *ast, struct fh_token *tok);

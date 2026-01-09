@@ -47,6 +47,7 @@ void fh_free_object(struct fh_program *prog, union fh_object *obj) {
         case FH_VAL_NULL:
         case FH_VAL_BOOL:
         case FH_VAL_FLOAT:
+        case FH_VAL_INTEGER:
         case FH_VAL_C_FUNC:
             fprintf(stderr, "**** ERROR: freeing object of NON-OBJECT type %d\n", obj->header.type);
             free(obj);
@@ -320,7 +321,7 @@ struct fh_string *fh_make_string(struct fh_program *prog, bool pinned, const cha
  * @param prog the program to which to bind the ptr
  * @param ptr the actual data you want to save
  * @param callback called when the object is about to be deleted, you may pass NULL if you don't want to do something about it
- * @param type *USER* defined type to later recognize the ptr. THIS SHOULD NOT BE A FH TYPE, eg: FH_VAL_FLOAT/STRING !
+ * @param type *USER* defined type to later recognize the ptr. THIS SHOULD NOT BE A FH TYPE, eg: FH_VAL_FLOAT/INTEGER/STRING !
  * @return a new fh_value which holds the ptr of the user defined object
  */
 struct fh_value fh_new_c_obj(struct fh_program *prog, void *ptr, fh_c_obj_gc_callback callback, int type) {
@@ -404,6 +405,7 @@ const char *fh_type_to_str(struct fh_program *prog, enum fh_value_type type) {
         case FH_VAL_BOOL:
             return "bool";
         case FH_VAL_FLOAT:
+        case FH_VAL_INTEGER:
             return "number";
         case FH_VAL_C_FUNC:
             return "cfunc";
@@ -431,6 +433,16 @@ double fh_optnumber(struct fh_value *args, int n_args, int check, double opt) {
     }
     if (args[check].type == FH_VAL_FLOAT)
         return args[check].data.num;
+
+    return opt;
+}
+
+int64_t fh_optinteger(struct fh_value *args, int n_args, int check, int64_t opt) {
+    if (n_args <= check) {
+        return opt;
+    }
+    if (args[check].type == FH_VAL_INTEGER)
+        return args[check].data.i;
 
     return opt;
 }

@@ -103,7 +103,7 @@ static int get_token(struct fh_parser *p, struct fh_token *tok) {
     return 0;
 }
 
-static void unget_token(struct fh_parser *p, struct fh_token *tok) {
+static void unget_token(struct fh_parser *p, const struct fh_token *tok) {
     if (p->has_saved_tok) {
         fprintf(stderr, "ERROR: can't unget token: buffer full\n");
         return;
@@ -347,7 +347,7 @@ static int resolve_expr_stack(struct fh_parser *p, struct fh_src_loc loc,
                 break;
         }
 
-        if (expr->type == EXPR_FLOAT) {
+        if (expr->type == EXPR_FLOAT || expr->type == EXPR_INTEGER) {
             fh_free_expr(expr);
             fh_parse_error(p, loc, "bad operator assoc: %d", op_assoc);
             return -1;
@@ -618,16 +618,36 @@ static struct fh_p_expr *parse_expr(struct fh_parser *p, bool consume_stop, char
             }
             continue;
         }
-        /* number */
+        /* number or integer */
         if (tok_is_number(&tok)) {
             if (!expect_opn) {
                 fh_parse_error_expected(p, tok.loc, "'(' or operator");
                 goto err;
             }
-            struct fh_p_expr *num = new_expr(p, tok.loc, EXPR_FLOAT, 0);
-            if (!num)
+
+            if (get_token(p, &tok) < 0)
                 goto err;
-            num->data.num = tok.data.num;
+
+            bool is_int = true;
+            if (tok_is_punct(&tok, '.')) {
+                is_int = false;
+            } else {
+                unget_token(p, &tok);
+            }
+
+            struct fh_p_expr *num;
+            if (is_int) {
+                num = new_expr(p, tok.loc, EXPR_INTEGER, 0);
+                if (!num)
+                    goto err;
+                num->data.i = (int64_t) tok.data.num;
+            } else {
+                num = new_expr(p, tok.loc, EXPR_FLOAT, 0);
+                if (!num)
+                    goto err;
+                num->data.num = tok.data.num;
+            }
+
             push_opn(&opns, num);
             expect_opn = false;
             continue;

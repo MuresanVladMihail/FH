@@ -71,6 +71,7 @@ enum fh_value_type {
     FH_VAL_NULL,
     FH_VAL_BOOL,
     FH_VAL_FLOAT,
+    FH_VAL_INTEGER,
     FH_VAL_C_FUNC,
 
 #define FH_FIRST_OBJECT_VAL FH_VAL_STRING
@@ -97,6 +98,7 @@ struct fh_value {
         void *obj;
         fh_c_func c_func;
         double num;
+        int64_t i;
         bool b;
     } data;
 
@@ -166,15 +168,20 @@ int fh_set_verror(struct fh_program *prog, const char *fmt, va_list ap);
 
 void fh_collect_garbage(struct fh_program *prog);
 
-#define fh_is_null(v)     ((v)->type == FH_VAL_NULL)
-#define fh_is_bool(v)     ((v)->type == FH_VAL_BOOL)
-#define fh_is_number(v)   ((v)->type == FH_VAL_FLOAT)
-#define fh_is_c_obj(v)    ((v)->type == FH_VAL_C_OBJ)
-#define fh_is_c_func(v)   ((v)->type == FH_VAL_C_FUNC)
-#define fh_is_string(v)   ((v)->type == FH_VAL_STRING)
-#define fh_is_closure(v)  ((v)->type == FH_VAL_CLOSURE)
-#define fh_is_array(v)    ((v)->type == FH_VAL_ARRAY)
-#define fh_is_map(v)      ((v)->type == FH_VAL_MAP)
+
+int64_t fh_as_i64(struct fh_program *prog, const struct fh_value *v, const char *fn);
+
+#define fh_is_null(v)                   ((v)->type == FH_VAL_NULL)
+#define fh_is_bool(v)                   ((v)->type == FH_VAL_BOOL)
+#define fh_is_number(v)                 ((v)->type == FH_VAL_FLOAT)
+#define fh_is_integer(v)                ((v)->type == FH_VAL_INTEGER)
+#define fh_is_number_or_integer(v)      ((v)->type == FH_VAL_FLOAT || (v)->type == FH_VAL_INTEGER)
+#define fh_is_c_obj(v)                  ((v)->type == FH_VAL_C_OBJ)
+#define fh_is_c_func(v)                 ((v)->type == FH_VAL_C_FUNC)
+#define fh_is_string(v)                 ((v)->type == FH_VAL_STRING)
+#define fh_is_closure(v)                ((v)->type == FH_VAL_CLOSURE)
+#define fh_is_array(v)                  ((v)->type == FH_VAL_ARRAY)
+#define fh_is_map(v)                    ((v)->type == FH_VAL_MAP)
 
 #define fh_new_null()     ((struct fh_value) { .type = FH_VAL_NULL })
 
@@ -186,6 +193,9 @@ void fh_collect_garbage(struct fh_program *prog);
 
 #define fh_new_number(n)  ((struct fh_value) { .type = FH_VAL_FLOAT, .data = { .num = (n) }})
 #define fh_get_number(v)  ((v)->data.num)
+
+#define fh_new_integer(n)  ((struct fh_value) { .type = FH_VAL_INTEGER, .data = { .i = (n) }})
+#define fh_get_integer(v)  ((v)->data.i)
 
 struct fh_value fh_new_c_obj(struct fh_program *prog, void *ptr, fh_c_obj_gc_callback callback, int type);
 

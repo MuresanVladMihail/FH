@@ -299,6 +299,26 @@ static int add_const_number(struct fh_compiler *c, struct fh_src_loc loc, double
     return k;
 }
 
+static int add_const_integer(struct fh_compiler *c, struct fh_src_loc loc, int64_t i) {
+    struct func_info *fi = get_cur_func_info(c, loc);
+    if (!fi)
+        return -1;
+    int k = 0;
+    stack_foreach(struct fh_value, *, c, &fi->consts) {
+        if (c->type == FH_VAL_INTEGER && c->data.i == i)
+            return k;
+        k++;
+    }
+
+    k = value_stack_size(&fi->consts);
+    struct fh_value *val = add_const(c, loc);
+    if (!val)
+        return -1;
+    val->type = FH_VAL_INTEGER;
+    val->data.i = i;
+    return k;
+}
+
 static int add_const_string(struct fh_compiler *c, struct fh_src_loc loc, fh_string_id str_id) {
     struct func_info *fi = get_cur_func_info(c, loc);
     if (!fi)
@@ -1230,6 +1250,13 @@ static int compile_expr(struct fh_compiler *c, struct fh_p_expr *expr) {
             return k;
         }
 
+        case EXPR_INTEGER: {
+            int k = add_const_integer(c, expr->loc, expr->data.i);
+            if (k >= 0)
+                k += MAX_FUNC_REGS + 1;
+            return k;
+        }
+
         case EXPR_STRING: {
             int k = add_const_string(c, expr->loc, expr->data.str);
             if (k >= 0)
@@ -1373,6 +1400,9 @@ static int compile_test(struct fh_compiler *c, struct fh_p_expr *test, bool inve
     int rk;
     if (test->type == EXPR_FLOAT) {
         rk = add_const_number(c, test->loc, test->data.num);
+        if (rk >= 0) rk += MAX_FUNC_REGS + 1;
+    } else if (test->type == EXPR_INTEGER) {
+        rk = add_const_integer(c, test->loc, test->data.i);
         if (rk >= 0) rk += MAX_FUNC_REGS + 1;
     } else {
         rk = compile_expr(c, test);
