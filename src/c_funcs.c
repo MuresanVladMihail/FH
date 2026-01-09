@@ -1223,10 +1223,9 @@ static int fn_string_slice(struct fh_program *prog, struct fh_value *ret,
     size_t end = len;
     if (n_args == 3) {
         int32_t end_i32;
-        if (fh_arg_int32(prog, &args[2], "slice()", 2, &end_i32) < 0) return -1;
-        const int end_i = (int) end_i32;
-        if (end_i < 0) return fh_set_error(prog, "Invalid end index value");
-        end = (size_t) end_i;
+        if (fh_arg_int32(prog, &args[2], "string_slice()", 2, &end_i32) < 0) return -1;
+        if (end_i32 < 0) return fh_set_error(prog, "Invalid end index value");
+        end = (size_t) end_i32;
         if (end < start_i32 || end > len)
             return fh_set_error(prog, "Invalid end index value");
     }

@@ -1,6 +1,5 @@
 fn bench_objects(N) {
     let v = [];
-    reserve(v, N);
     let i = 0;
 
     # alloc_only: create N objects
@@ -32,10 +31,7 @@ fn bench_objects(N) {
     let keep = [];
     i = 0;
     while (i < N * 3) {
-        let t = {};
-        t["a"] = i;
-        t["b"] = i + 1;
-        t["c"] = i + 2;
+        let t = {"a": i, "b": i + 1, "c": i + 2};
         if ((i % 10) == 0) append(keep, t);
         i = i + 1;
     }
