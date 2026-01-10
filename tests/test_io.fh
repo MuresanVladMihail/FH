@@ -88,5 +88,5 @@ fn main() {
     test_write_seek_read();
     test_rename_and_remove();
     test_mkdir_and_filetype();
-    println("ok");
+    print("ok\n");
 }

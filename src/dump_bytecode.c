@@ -37,11 +37,13 @@ static void dump_instr_ret(uint32_t instr) {
         return;
     }
 
-    int b = GET_INSTR_RB(instr);
-    if (b <= MAX_FUNC_REGS)
+    const int b = GET_INSTR_RB(instr);
+    if (b < MAX_FUNC_REGS)
         printf("r%d\n", b);
-    else
+    else if (b > MAX_FUNC_REGS)
         printf("c[%d]\n", b - MAX_FUNC_REGS - 1);
+    else
+        printf("<invalid rk=%d>\n", b); // rk==MAX_FUNC_REGS (256) is reserved
 }
 
 static void dump_instr_jmp(uint32_t instr, int32_t addr) {
@@ -57,10 +59,12 @@ static void dump_instr_up_rkb(uint32_t instr) {
     int b = GET_INSTR_RB(instr);
 
     printf("u[%d], ", a);
-    if (b <= MAX_FUNC_REGS)
+    if (b < MAX_FUNC_REGS)
         printf("r%d", b);
-    else
+    else if (b > MAX_FUNC_REGS)
         printf("c[%d]", b - MAX_FUNC_REGS - 1);
+    else
+        printf("<invalid rk=%d>", b);
     printf("\n");
 }
 
@@ -81,31 +85,38 @@ static void dump_instr_abc(uint32_t instr) {
 }
 
 static void dump_instr_a_rkb(uint32_t instr) {
-    int a = GET_INSTR_RA(instr);
-    int b = GET_INSTR_RB(instr);
+    const int a = GET_INSTR_RA(instr);
+    const int b = GET_INSTR_RB(instr);
 
     printf("%d, ", a);
-    if (b <= MAX_FUNC_REGS)
+    if (b < MAX_FUNC_REGS)
         printf("r%d", b);
-    else
+    else if (b > MAX_FUNC_REGS)
         printf("c[%d]", b - MAX_FUNC_REGS - 1);
+    else
+        printf("<invalid rk=%d>", b);
     printf("\n");
 }
 
 static void dump_instr_a_rkb_rkc(uint32_t instr) {
-    int a = GET_INSTR_RA(instr);
-    int b = GET_INSTR_RB(instr);
-    int c = GET_INSTR_RC(instr);
+    const int a = GET_INSTR_RA(instr);
+    const int b = GET_INSTR_RB(instr);
+    const int c = GET_INSTR_RC(instr);
 
     printf("%d, ", a);
-    if (b <= MAX_FUNC_REGS)
+    if (b < MAX_FUNC_REGS)
         printf("r%d, ", b);
-    else
+    else if (b > MAX_FUNC_REGS)
         printf("c[%d], ", b - MAX_FUNC_REGS - 1);
-    if (c <= MAX_FUNC_REGS)
-        printf("r%d", c);
     else
+        printf("<invalid rk=%d>, ", b);
+
+    if (c < MAX_FUNC_REGS)
+        printf("r%d", c);
+    else if (c > MAX_FUNC_REGS)
         printf("c[%d]", c - MAX_FUNC_REGS - 1);
+    else
+        printf("<invalid rk=%d>", c);
     printf("\n");
 }
 
@@ -115,14 +126,19 @@ static void dump_instr_ra_rkb_rkc(uint32_t instr) {
     const int c = GET_INSTR_RC(instr);
 
     printf("r%d, ", a);
-    if (b <= MAX_FUNC_REGS)
+    if (b < MAX_FUNC_REGS)
         printf("r%d, ", b);
-    else
+    else if (b > MAX_FUNC_REGS)
         printf("c[%d], ", b - MAX_FUNC_REGS - 1);
-    if (c <= MAX_FUNC_REGS)
-        printf("r%d", c);
     else
+        printf("<invalid rk=%d>, ", b);
+
+    if (c < MAX_FUNC_REGS)
+        printf("r%d", c);
+    else if (c > MAX_FUNC_REGS)
         printf("c[%d]", c - MAX_FUNC_REGS - 1);
+    else
+        printf("<invalid rk=%d>", c);
     printf("\n");
 }
 
@@ -131,10 +147,12 @@ static void dump_instr_ra_rkb(uint32_t instr) {
     int b = GET_INSTR_RB(instr);
 
     printf("r%d, ", a);
-    if (b <= MAX_FUNC_REGS)
+    if (b < MAX_FUNC_REGS)
         printf("r%d", b);
-    else
+    else if (b > MAX_FUNC_REGS)
         printf("c[%d]", b - MAX_FUNC_REGS - 1);
+    else
+        printf("<invalid rk=%d>", b);
     printf("\n");
 }
 
@@ -161,7 +179,7 @@ void fh_dump_bc_instr(struct fh_program *prog, int32_t addr, uint32_t instr) {
     else
         printf("     ");
     //printf("%08x     ", instr);
-    enum fh_bc_opcode opc = GET_INSTR_OP(instr);
+    const enum fh_bc_opcode opc = GET_INSTR_OP(instr);
     switch (opc) {
         case OPC_RET: printf("ret       ");
             dump_instr_ret(instr);
@@ -255,16 +273,46 @@ void fh_dump_bc_instr(struct fh_program *prog, int32_t addr, uint32_t instr) {
         case OPC_CMP_EQ: printf("cmp.eq    ");
             dump_instr_a_rkb_rkc(instr);
             return;
+        case OPC_CMP_EQI: printf("cmp.eqi   ");
+            dump_instr_a_rkb_rkc(instr);
+            return;
+        case OPC_CMP_EQF: printf("cmp.eqf   ");
+            dump_instr_a_rkb_rkc(instr);
+            return;
         case OPC_CMP_GT: printf("cmp.gt    ");
+            dump_instr_a_rkb_rkc(instr);
+            return;
+        case OPC_CMP_GTI: printf("cmp.gti    ");
+            dump_instr_a_rkb_rkc(instr);
+            return;
+        case OPC_CMP_GTF: printf("cmp.gtf    ");
             dump_instr_a_rkb_rkc(instr);
             return;
         case OPC_CMP_GE: printf("cmp.ge    ");
             dump_instr_a_rkb_rkc(instr);
             return;
+        case OPC_CMP_GEI: printf("cmp.gei   ");
+            dump_instr_a_rkb_rkc(instr);
+            return;
+        case OPC_CMP_GEF: printf("cmp.gef   ");
+            dump_instr_a_rkb_rkc(instr);
+            return;
         case OPC_CMP_LT: printf("cmp.lt    ");
             dump_instr_a_rkb_rkc(instr);
             return;
+        case OPC_CMP_LTI: printf("cmp.lti   ");
+            dump_instr_a_rkb_rkc(instr);
+            return;
+        case OPC_CMP_LTF: printf("cmp.ltf   ");
+            dump_instr_a_rkb_rkc(instr);
+            return;
         case OPC_CMP_LE: printf("cmp.le    ");
+            dump_instr_a_rkb_rkc(instr);
+            return;
+        case OPC_CMP_LEI: printf("cmp.lei   ");
+            dump_instr_a_rkb_rkc(instr);
+            return;
+        case OPC_CMP_LEF: printf("cmp.lef   ");
             dump_instr_a_rkb_rkc(instr);
             return;
         case OPC_TEST: printf("test      ");

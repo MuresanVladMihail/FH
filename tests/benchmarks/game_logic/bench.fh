@@ -49,22 +49,19 @@ fn bench(frames, entities, spawnPerFrame) {
     let xs=[]; let ys=[]; let vxs=[]; let vys=[];
     let ws=[]; let hs=[]; let onGs=[]; let ais=[]; let lifes=[];
 
-    let i=0;
-    while (i<entities) { spawn_entity(seed[0],w,h,xs,ys,vxs,vys,ws,hs,onGs,ais,lifes); i++; }
+    for (let i = 0; i<entities; i++) { spawn_entity(seed[0],w,h,xs,ys,vxs,vys,ws,hs,onGs,ais,lifes);  }
 
     let dt=1.0/60.0;
     let checksum=0.0;
 
-    let f=0;
-    while (f<frames) {
-        let s=0;
-        while (s<spawnPerFrame) { spawn_entity(seed[0],w,h,xs,ys,vxs,vys,ws,hs,onGs,ais,lifes); s++; }
+    for (let f = 0; f<frames;f++) {
+        for (let s = 0; s<spawnPerFrame; s = s + 1) { spawn_entity(seed[0],w,h,xs,ys,vxs,vys,ws,hs,onGs,ais,lifes); }
 
         # in-place compaction across ALL arrays
         let write=0;
         let n=0;
         let L=len(xs);
-        while (n<L) {
+        for (let n = 0; n<L; n++) {
             let x=xs[n]; let y=ys[n]; let vx=vxs[n]; let vy=vys[n];
             let ew=ws[n]; let eh=hs[n];
             let onG=onGs[n]; let ai=ais[n];
@@ -97,19 +94,13 @@ fn bench(frames, entities, spawnPerFrame) {
                 ws[write]=ew; hs[write]=eh; onGs[write]=onG; ais[write]=ai; lifes[write]=life;
                 write = write + 1;
             }
-
-            n++;
         }
 
         # trim tails (set to NULL so GC can drop refs if needed)
-        let k=write;
-        while (k < L) {
+        for (let k = write; k < L; k++) {
             xs[k]=null; ys[k]=null; vxs[k]=null; vys[k]=null;
             ws[k]=null; hs[k]=null; onGs[k]=null; ais[k]=null; lifes[k]=null;
-            k=k+1;
         }
-
-        f++;
     }
 
     printf("%f\n", checksum);

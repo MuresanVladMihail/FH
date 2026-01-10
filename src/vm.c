@@ -384,6 +384,31 @@ static bool fh_num_equals_int64(const double d, const int64_t i) {
     return (int64_t) d == i;
 }
 
+static bool vals_are_equali(struct fh_value *v1, struct fh_value *v2) {
+    if (v1->type == FH_VAL_UPVAL)
+        v1 = GET_OBJ_UPVAL(v1)->val;
+    if (v2->type == FH_VAL_UPVAL)
+        v2 = GET_OBJ_UPVAL(v2)->val;
+
+    if (!fh_is_integer(v1) || !fh_is_integer(v2)) {
+        return false;
+    }
+    return fh_get_integer(v1) == fh_get_integer(v2);
+}
+
+static bool vals_are_equalf(struct fh_value *v1, struct fh_value *v2) {
+    if (v1->type == FH_VAL_UPVAL)
+        v1 = GET_OBJ_UPVAL(v1)->val;
+    if (v2->type == FH_VAL_UPVAL)
+        v2 = GET_OBJ_UPVAL(v2)->val;
+
+    if (!fh_is_float(v1) || !fh_is_float(v2)) {
+        return false;
+    }
+
+    return fh_get_float(v1) == fh_get_float(v2);
+}
+
 bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
     if (v1->type == FH_VAL_UPVAL)
         v1 = GET_OBJ_UPVAL(v1)->val;
@@ -521,11 +546,14 @@ static void save_error_loc(struct fh_vm *vm) {
 }
 
 #define handle_op(op) case op:
-#define LOAD_CONST(index) (&const_base[(index) - MAX_FUNC_REGS - 1])
-#define LOAD_REG_OR_CONST(index) \
-(((index) < MAX_FUNC_REGS) ? (&reg_base[(index)]) : (&const_base[(index) - MAX_FUNC_REGS - 1]))
+#define RK_IS_REG(i)        ((i) < MAX_FUNC_REGS)
+#define RK_IS_CONST(i)      ((i) >= (MAX_FUNC_REGS + 1))
+#define RK_CONST_INDEX(i)   ((i) - (MAX_FUNC_REGS + 1))
 
-#define LOAD_REG(index)    (&reg_base[index])
+#define LOAD_REG(i)         (&reg_base[(i)])
+#define LOAD_CONST(i)       (&const_base[RK_CONST_INDEX(i)])
+
+#define LOAD_REG_OR_CONST(i) (RK_IS_REG(i) ? LOAD_REG(i) : (RK_IS_CONST(i) ? LOAD_CONST(i) : NULL))
 
 #define do_simple_arithmetic(op, ra, rb_i, rc_i)  { \
     struct fh_value *rb = LOAD_REG_OR_CONST(rb_i); \
@@ -541,8 +569,10 @@ static void save_error_loc(struct fh_vm *vm) {
         ra->type = FH_VAL_INTEGER; \
         ra->data.i = rb->data.i op rc->data.i; \
     } else { \
+        const double a = fh_to_double(rb); \
+        const double b = fh_to_double(rc); \
         ra->type = FH_VAL_FLOAT; \
-        ra->data.num = fh_to_double(rb) op fh_to_double(rc); \
+        ra->data.num = a op b; \
     } \
 }
 #define do_simple_arithmetic_unary(op, ra, rb_i)  { \
@@ -568,23 +598,24 @@ static void save_error_loc(struct fh_vm *vm) {
     ra->type = FH_VAL_INTEGER; \
     ra->data.i = op rb->data.i; \
 }
-#define do_test_arithmetic(op, ret, rb_i, rc_i)  { \
+#define do_test_arithmetic(op, ret, rb_i, rc_i)  do { \
     struct fh_value *rb = LOAD_REG_OR_CONST(rb_i); \
     struct fh_value *rc = LOAD_REG_OR_CONST(rc_i); \
     if (!fh_is_number(rb) || !fh_is_number(rc)) { \
-        char err[128] = {0}; \
-        sprintf(err, "using %s with non-numeric values", #op); \
-        vm_error(vm, err); \
+        vm_error(vm, "comparison on non-numeric values"); \
         goto user_err; \
     } \
     if (fh_is_integer(rb) && fh_is_integer(rc)) { \
-        *ret = rb->data.i op rc->data.i; \
+        *(ret) = (rb->data.i op rc->data.i); \
     } else if (fh_is_float(rb) && fh_is_float(rc)) { \
-        *ret = rb->data.num op rc->data.num; \
+        *(ret) = (rb->data.num op rc->data.num); \
     } else { \
-        *ret = fh_to_double(rb) op fh_to_double(rc); \
+        const double a = fh_to_double(rb); \
+        const double b = fh_to_double(rc); \
+        *(ret) = (a op b); \
     } \
-}
+} while (0)
+
 #define do_bitwise_arithmetic(op, ra, rb_i, rc_i)  { \
     struct fh_value *rb = LOAD_REG_OR_CONST(rb_i); \
     struct fh_value *rc = LOAD_REG_OR_CONST(rc_i); \
@@ -657,10 +688,24 @@ int fh_run_vm(struct fh_vm *vm) {
         [OPC_TEST] = &&op_TEST,
 
         [OPC_CMP_EQ] = &&op_CMP_EQ,
+        [OPC_CMP_EQI] = &&op_CMP_EQI,
+        [OPC_CMP_EQF] = &&op_CMP_EQF,
+
         [OPC_CMP_GT] = &&op_CMP_GT,
+        [OPC_CMP_GTI] = &&op_CMP_GTI,
+        [OPC_CMP_GTF] = &&op_CMP_GTF,
+
         [OPC_CMP_GE] = &&op_CMP_GE,
+        [OPC_CMP_GEI] = &&op_CMP_GEI,
+        [OPC_CMP_GEF] = &&op_CMP_GEF,
+
         [OPC_CMP_LT] = &&op_CMP_LT,
+        [OPC_CMP_LTI] = &&op_CMP_LTI,
+        [OPC_CMP_LTF] = &&op_CMP_LTF,
+
         [OPC_CMP_LE] = &&op_CMP_LE,
+        [OPC_CMP_LEI] = &&op_CMP_LEI,
+        [OPC_CMP_LEF] = &&op_CMP_LEF,
 
         [OPC_LEN] = &&op_LEN,
         [OPC_APPEND] = &&op_APPEND,
@@ -1021,10 +1066,27 @@ op_ADD: {
         struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
         struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
 
+
         if (fh_is_number(rb) && fh_is_number(rc)) {
-            // mixed int/float => float
+            // int + int -> int
+            if (fh_is_integer(rb) && fh_is_integer(rc)) {
+                ra->type = FH_VAL_INTEGER;
+                ra->data.i = rb->data.i + rc->data.i;
+                DISPATCH();
+            }
+
+            // float + float -> float
+            if (fh_is_float(rb) && fh_is_float(rc)) {
+                ra->type = FH_VAL_FLOAT;
+                ra->data.num = rb->data.num + rc->data.num;
+                DISPATCH();
+            }
+
+            // mixed -> float
+            double a = fh_to_double(rb);
+            double b = fh_to_double(rc);
             ra->type = FH_VAL_FLOAT;
-            ra->data.num = fh_to_double(rb) + fh_to_double(rc);
+            ra->data.num = a + b;
             DISPATCH();
         }
 
@@ -1086,7 +1148,23 @@ op_MUL: {
     }
 
 op_DIV: {
-        do_simple_arithmetic(/, ra, rb_i, rc_i);
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+
+        if (!fh_is_number(rb) || !fh_is_number(rc)) {
+            vm_error(vm, "arithmetic on non-numeric values");
+            goto user_err;
+        }
+
+        if (fh_to_double(rc) == 0.0) {
+            vm_error(vm, "division by zero");
+            goto user_err;
+        }
+
+        ra->type = FH_VAL_FLOAT;
+        const double a = fh_to_double(rb);
+        const double b = fh_to_double(rc);
+        ra->data.num = a / b;
         DISPATCH();
     }
 
@@ -1125,7 +1203,6 @@ op_CALL: {
         if (t == FH_VAL_CLOSURE) {
             struct fh_closure *cl = GET_OBJ_CLOSURE(ra->data.obj);
             uint32_t *func_addr = cl->func_def->code;
-
             struct fh_vm_call_frame *new_frame = prepare_call(vm, cl, ret_reg, (int) rb_i);
             if (!new_frame) goto err;
 
@@ -1193,9 +1270,54 @@ op_CMP_EQ: {
         DISPATCH();
     }
 
+op_CMP_EQI: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        cmp_test = (vals_are_equali(rb, rc) ^ (int) ra_i);
+        if (cmp_test) pc++;
+        DISPATCH();
+    }
+
+op_CMP_EQF: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        cmp_test = vals_are_equalf(rb, rc) ^ (int) ra_i;
+        if (cmp_test) pc++;
+        DISPATCH();
+    }
+
 op_CMP_GT: {
+        // printf("CMP_GT ra=%u rb=%u rc=%u (rb_const=%d rc_const=%d)\n", ra_i, rb_i, rc_i, RK_IS_CONST(rb_i),
+        // RK_IS_CONST(rc_i));
         cmp_test = 0;
         do_test_arithmetic(>, &cmp_test, rb_i, rc_i);
+        cmp_test ^= (int) ra_i;
+        if (cmp_test) pc++;
+        DISPATCH();
+    }
+
+op_CMP_GTI: {
+        cmp_test = 0;
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        if (!fh_is_integer(rb) || !fh_is_integer(rc)) {
+            vm_error(vm, "using '>' with non-integer values");
+            goto user_err;
+        }
+        cmp_test = (rb->data.i > rc->data.i) ^ (int) ra_i;
+        if (cmp_test) pc++;
+        DISPATCH();
+    }
+
+op_CMP_GTF: {
+        cmp_test = 0;
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        if (!fh_is_float(rb) || !fh_is_float(rc)) {
+            vm_error(vm, "using '>' with non-float values");
+            goto user_err;
+        }
+        cmp_test = (rb->data.num > rc->data.num) ^ (int) ra_i;
         if (cmp_test) pc++;
         DISPATCH();
     }
@@ -1203,6 +1325,33 @@ op_CMP_GT: {
 op_CMP_GE: {
         cmp_test = 0;
         do_test_arithmetic(>=, &cmp_test, rb_i, rc_i);
+        cmp_test ^= (int) ra_i;
+        if (cmp_test) pc++;
+        DISPATCH();
+    }
+
+op_CMP_GEI: {
+        cmp_test = 0;
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        if (!fh_is_integer(rb) || !fh_is_integer(rc)) {
+            vm_error(vm, "using '>=' with non-integer values");
+            goto user_err;
+        }
+        cmp_test = (rb->data.i >= rc->data.i) ^ (int) ra_i;
+        if (cmp_test) pc++;
+        DISPATCH();
+    }
+
+op_CMP_GEF: {
+        cmp_test = 0;
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        if (!fh_is_float(rb) || !fh_is_float(rc)) {
+            vm_error(vm, "using '>=' with non-float values");
+            goto user_err;
+        }
+        cmp_test = (rb->data.num >= rc->data.num) ^ (int) ra_i;
         if (cmp_test) pc++;
         DISPATCH();
     }
@@ -1210,6 +1359,33 @@ op_CMP_GE: {
 op_CMP_LT: {
         cmp_test = 0;
         do_test_arithmetic(<, &cmp_test, rb_i, rc_i);
+        cmp_test ^= (int) ra_i;
+        if (cmp_test) pc++;
+        DISPATCH();
+    }
+
+op_CMP_LTF: {
+        cmp_test = 0;
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        if (!fh_is_float(rb) || !fh_is_float(rc)) {
+            vm_error(vm, "using '<' with non-float values");
+            goto user_err;
+        }
+        cmp_test = (rb->data.num < rc->data.num) ^ (int) ra_i;
+        if (cmp_test) pc++;
+        DISPATCH();
+    }
+
+op_CMP_LTI: {
+        cmp_test = 0;
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        if (!fh_is_integer(rb) || !fh_is_integer(rc)) {
+            vm_error(vm, "using '<' with non-integer values");
+            goto user_err;
+        }
+        cmp_test = (rb->data.i < rc->data.i) ^ (int) ra_i;
         if (cmp_test) pc++;
         DISPATCH();
     }
@@ -1217,6 +1393,33 @@ op_CMP_LT: {
 op_CMP_LE: {
         cmp_test = 0;
         do_test_arithmetic(<=, &cmp_test, rb_i, rc_i);
+        cmp_test ^= (int) ra_i;
+        if (cmp_test) pc++;
+        DISPATCH();
+    }
+
+op_CMP_LEI: {
+        cmp_test = 0;
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        if (!fh_is_integer(rb) || !fh_is_integer(rc)) {
+            vm_error(vm, "using '<=' with non-integer values");
+            goto user_err;
+        }
+        cmp_test = (rb->data.i <= rc->data.i) ^ (int) ra_i;
+        if (cmp_test) pc++;
+        DISPATCH();
+    }
+
+op_CMP_LEF: {
+        cmp_test = 0;
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        if (!fh_is_float(rb) || !fh_is_float(rc)) {
+            vm_error(vm, "using '<=' with non-float values");
+            goto user_err;
+        }
+        cmp_test = (rb->data.num <= rc->data.num) ^ (int) ra_i;
         if (cmp_test) pc++;
         DISPATCH();
     }
