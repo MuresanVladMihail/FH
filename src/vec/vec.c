@@ -1,5 +1,6 @@
 #include "vec.h"
 #include <limits.h>
+#include <stdint.h>
 
 /* ---- helpers ---- */
 
@@ -70,7 +71,7 @@ int vec_expand_(char **data, size_t *length, size_t *capacity, size_t memsz) {
 }
 
 int vec_compact_(char **data, size_t *length, size_t *capacity, size_t memsz) {
-    size_t n = *length;
+    const size_t n = *length;
     if (n == *capacity) return 0;
 
     if (n == 0) {
@@ -114,7 +115,7 @@ int vec_splice_(char **data, size_t *length, size_t *capacity, size_t memsz, siz
     if (start > *length) return -1;
     if (count > *length - start) return -1;
 
-    size_t tail = *length - (start + count);
+    const size_t tail = *length - (start + count);
     if (tail > 0) {
         memmove(*data + start * memsz,
                 *data + (start + count) * memsz,
