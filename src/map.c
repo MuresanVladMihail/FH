@@ -21,7 +21,7 @@ static inline uint32_t next_pow2_u32(uint32_t x) {
     return x + 1;
 }
 
-static inline uint32_t hash_i32(uint32_t x) {
+static inline int32_t hash_i32(uint32_t x) {
     x ^= x >> 16;
     x *= 0x7feb352dU;
     x ^= x >> 15;

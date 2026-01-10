@@ -132,5 +132,11 @@ fn main() {
     # substr at end with len 0
     assert(string_substr("abc", 3, 0) == "");
 
+    assert(true+"test" == "truetest");
+    assert(false+" test" == "false test");
+
+    assert("test "+true == "test true");
+    assert("test"+false == "testfalse");
+
     print("ok\n");
 }

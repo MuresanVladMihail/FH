@@ -140,11 +140,11 @@ struct fh_upval_def {
 #define UPVAL_IS_OPEN(uv)    ((uv)->val != &(uv)->data.storage)
 
 // non-object types
-#define fh_make_null   fh_new_null
-#define fh_make_bool   fh_new_bool
-#define fh_make_number fh_new_number
+#define fh_make_null    fh_new_null
+#define fh_make_bool    fh_new_bool
+#define fh_make_float   fh_new_float
 #define fh_make_integer fh_new_integer
-#define fh_make_c_func fh_new_c_func
+#define fh_make_c_func  fh_new_c_func
 
 int fh_arg_int32(struct fh_program *prog, const struct fh_value *v, const char *fn, int arg_index_0_based,
                  int32_t *out);

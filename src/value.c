@@ -42,7 +42,7 @@ static void free_map(struct fh_map *map) {
 
 int fh_arg_int32(struct fh_program *prog, const struct fh_value *v, const char *fn, int arg_index_0_based,
                  int32_t *out) {
-    if (!fh_is_number_or_integer(v)) {
+    if (!fh_is_number(v)) {
         return fh_set_error(prog, "%s: expected number/integer for argument %d, got %s",
                             fn, arg_index_0_based + 1, fh_type_to_str(prog, v->type));
     }
@@ -56,7 +56,7 @@ int fh_arg_int32(struct fh_program *prog, const struct fh_value *v, const char *
         return 0;
     }
 
-    const double d = fh_get_number((struct fh_value*)v);
+    const double d = fh_get_float((struct fh_value*)v);
     if (!isfinite(d)) {
         return fh_set_error(prog, "%s: argument %d must be finite", fn, arg_index_0_based + 1);
     }
@@ -73,7 +73,7 @@ int fh_arg_int32(struct fh_program *prog, const struct fh_value *v, const char *
 
 int fh_arg_double(struct fh_program *prog, const struct fh_value *v, const char *fn, int arg_index_0_based,
                   double *out) {
-    if (fh_is_number(v)) {
+    if (fh_is_float(v)) {
         const double d = v->data.num;
         if (!isfinite(d)) {
             return fh_set_error(prog, "%s: argument %d must be finite", fn, arg_index_0_based + 1);

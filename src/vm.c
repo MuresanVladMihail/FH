@@ -10,6 +10,7 @@
 #include "program.h"
 #include "bytecode.h"
 #include "value.h"
+#include <stdint.h>
 
 #ifndef FH_MAXSHORTLEN
 #define FH_MAXSHORTLEN 64
@@ -17,13 +18,13 @@
 
 static int vm_error(struct fh_vm *vm, char *fmt, ...);
 
-static inline int64_t fh_java_shl_i64(int64_t a, int64_t s) {
+static inline int64_t fh_java_shl_i64(const int64_t a, const int64_t s) {
     const uint32_t dist = (uint32_t) s & 63u; // Java: n & 0x3f
     return (int64_t) ((uint64_t) a << dist);
 }
 
-static inline int64_t fh_java_sar_i64(int64_t a, int64_t s) {
-    uint32_t dist = (uint32_t) s & 63u;
+static inline int64_t fh_java_sar_i64(const int64_t a, const int64_t s) {
+    const uint32_t dist = (uint32_t) s & 63u;
     if (dist == 0) return a;
 
     const uint64_t ua = (uint64_t) a;
@@ -143,10 +144,7 @@ static inline struct fh_value fh_add_float_string(struct fh_program *prog, const
     return v;
 }
 
-static inline struct fh_value fh_add_string_string(struct fh_program *prog, struct fh_string *a, struct fh_string *b) {
-    const char *sa = GET_OBJ_STRING_DATA(a);
-    const char *sb = GET_OBJ_STRING_DATA(b);
-
+static inline struct fh_value fh_add_string_string(struct fh_program *prog, const char *sa, const char *sb) {
     const size_t la = strlen(sa);
     const size_t lb = strlen(sb);
     const size_t len = la + lb + 1;
@@ -167,7 +165,7 @@ static inline struct fh_value fh_add_string_string(struct fh_program *prog, stru
     memcpy(heap, sa, la);
     memcpy(heap + la, sb, lb + 1);
 
-    struct fh_value v = fh_new_string(prog, heap);
+    const struct fh_value v = fh_new_string(prog, heap);
     free(heap);
     return v;
 }
@@ -317,7 +315,10 @@ int fh_call_vm_function(struct fh_vm *vm, struct fh_closure *closure,
         n_args = fh_func_def->n_params;
 
     struct fh_vm_call_frame *prev_frame = call_frame_stack_top(&vm->call_stack);
-    const int ret_reg = (prev_frame) ? prev_frame->base + prev_frame->closure->func_def->n_regs : 0;
+    int ret_reg = 0;
+    if (prev_frame && prev_frame->closure) {
+        ret_reg = prev_frame->base + prev_frame->closure->func_def->n_regs;
+    }
 
     ensure_stack_size(vm, ret_reg + n_args + 1);
 
@@ -363,8 +364,6 @@ static bool fh_val_is_true(struct fh_value *val) {
     return false;
 }
 
-#include <stdint.h>
-
 static inline bool fh_double_is_finite(const double d) {
     const union {
         double d;
@@ -377,24 +376,12 @@ static inline bool fh_double_is_finite(const double d) {
 }
 
 static bool fh_num_equals_int64(const double d, const int64_t i) {
-    // Must be finite (reject NaN/Inf)
     if (!fh_double_is_finite(d)) return false;
 
-    // Must be an integer-valued double
-    if (trunc(d) != d) return false;
+    const double id = (double) i;
+    if (id != d) return false;
 
-    // Must be representable in int64 range
-    if (d < (double) INT64_MIN || d > (double) INT64_MAX) return false;
-
-    // Convert and compare
-    const int64_t di = (int64_t) d;
-    if (di != i) return false;
-
-    // Ensure the integer is exactly representable as this double
-    // (prevents precision-rounding false positives beyond 2^53)
-    if ((double) i != d) return false;
-
-    return true;
+    return (int64_t) d == i;
 }
 
 bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
@@ -404,10 +391,10 @@ bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
         v2 = GET_OBJ_UPVAL(v2)->val;
 
     if (v1->type != v2->type) {
-        if (fh_is_number(v1) && fh_is_integer(v2)) {
+        if (fh_is_float(v1) && fh_is_integer(v2)) {
             return fh_num_equals_int64(v1->data.num, v2->data.i);
         }
-        if (fh_is_integer(v1) && fh_is_number(v2)) {
+        if (fh_is_integer(v1) && fh_is_float(v2)) {
             return fh_num_equals_int64(v2->data.num, v1->data.i);
         }
         return false;
@@ -428,8 +415,8 @@ bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
             return v1->data.obj == v2->data.obj;
 
         case FH_VAL_STRING: {
-            struct fh_string *s1 = GET_VAL_STRING(v1);
-            struct fh_string *s2 = GET_VAL_STRING(v2);
+            const struct fh_string *s1 = GET_VAL_STRING(v1);
+            const struct fh_string *s2 = GET_VAL_STRING(v2);
 
             if (v1->data.obj == v2->data.obj) return true;
 
@@ -445,7 +432,7 @@ bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
     return false;
 }
 
-static inline int vm_assert_index(struct fh_vm *vm, const struct fh_value *idx_val, uint32_t *out,
+static inline int vm_assert_index(struct fh_vm *vm, const struct fh_value *idx_val, int64_t *out,
                                   const char *what) {
     if (idx_val->type != FH_VAL_INTEGER) {
         vm_error(vm, "invalid %s access (non-integer index)", what);
@@ -534,43 +521,40 @@ static void save_error_loc(struct fh_vm *vm) {
 }
 
 #define handle_op(op) case op:
-#define LOAD_REG_OR_CONST(index) \
-(((index) < MAX_FUNC_REGS) ? &reg_base[index] : &const_base[(index) - MAX_FUNC_REGS - 1])
 #define LOAD_CONST(index) (&const_base[(index) - MAX_FUNC_REGS - 1])
+#define LOAD_REG_OR_CONST(index) \
+(((index) < MAX_FUNC_REGS) ? (&reg_base[(index)]) : (&const_base[(index) - MAX_FUNC_REGS - 1]))
 
 #define LOAD_REG(index)    (&reg_base[index])
 
 #define do_simple_arithmetic(op, ra, rb_i, rc_i)  { \
     struct fh_value *rb = LOAD_REG_OR_CONST(rb_i); \
     struct fh_value *rc = LOAD_REG_OR_CONST(rc_i); \
-    if (!fh_is_number_or_integer(rb) || !fh_is_number_or_integer(rc)) { \
+    if (!fh_is_number(rb) || !fh_is_number(rc)) { \
         vm_error(vm, "arithmetic on non-numeric values"); \
         goto user_err; \
     } \
-    if (fh_is_number(rb) && fh_is_number(rc)) { \
+    if (fh_is_float(rb) && fh_is_float(rc)) { \
         ra->type = FH_VAL_FLOAT; \
         ra->data.num = rb->data.num op rc->data.num; \
     } else if (fh_is_integer(rb) && fh_is_integer(rc)) { \
         ra->type = FH_VAL_INTEGER; \
         ra->data.i = rb->data.i op rc->data.i; \
-    } else if (fh_is_number(rb) && fh_is_integer(rc)) { \
+    } else { \
         ra->type = FH_VAL_FLOAT; \
-        ra->data.num = rb->data.num op (double)rc->data.i; \
-    } else if (fh_is_integer(rb) && fh_is_number(rc)) { \
-        ra->type = FH_VAL_FLOAT; \
-        ra->data.num = (double)rb->data.i op rc->data.num; \
+        ra->data.num = fh_to_double(rb) op fh_to_double(rc); \
     } \
 }
 #define do_simple_arithmetic_unary(op, ra, rb_i)  { \
         struct fh_value *rb = LOAD_REG_OR_CONST(rb_i); \
-        if (!fh_is_number_or_integer(rb)) { \
+        if (!fh_is_number(rb)) { \
             vm_error(vm, "arithmetic on non-numeric values"); \
             goto user_err; \
         } \
         if (fh_is_integer(rb)) { \
             ra->type = FH_VAL_INTEGER; \
             ra->data.i = op rb->data.i; \
-        } else if (fh_is_number(rb)) { \
+        } else if (fh_is_float(rb)) { \
             ra->type = FH_VAL_FLOAT; \
             ra->data.num = op rb->data.num; \
         }\
@@ -587,7 +571,7 @@ static void save_error_loc(struct fh_vm *vm) {
 #define do_test_arithmetic(op, ret, rb_i, rc_i)  { \
     struct fh_value *rb = LOAD_REG_OR_CONST(rb_i); \
     struct fh_value *rc = LOAD_REG_OR_CONST(rc_i); \
-    if (!fh_is_number_or_integer(rb) || !fh_is_number_or_integer(rc)) { \
+    if (!fh_is_number(rb) || !fh_is_number(rc)) { \
         char err[128] = {0}; \
         sprintf(err, "using %s with non-numeric values", #op); \
         vm_error(vm, err); \
@@ -595,12 +579,10 @@ static void save_error_loc(struct fh_vm *vm) {
     } \
     if (fh_is_integer(rb) && fh_is_integer(rc)) { \
         *ret = rb->data.i op rc->data.i; \
-    } else if (fh_is_number(rb) && fh_is_number(rc)) { \
+    } else if (fh_is_float(rb) && fh_is_float(rc)) { \
         *ret = rb->data.num op rc->data.num; \
-    } else if (fh_is_number(rb) && fh_is_integer(rc)) { \
-        *ret = rb->data.num op (double)rc->data.i; \
-    } else if (fh_is_integer(rb) && fh_is_number(rc)) { \
-         *ret = (double)rb->data.i op rc->data.num; \
+    } else { \
+        *ret = fh_to_double(rb) op fh_to_double(rc); \
     } \
 }
 #define do_bitwise_arithmetic(op, ra, rb_i, rc_i)  { \
@@ -628,11 +610,6 @@ int fh_run_vm(struct fh_vm *vm) {
 
     int cmp_test = 0;
 
-    // --- helpers/macros that need reg_base/const_base
-#define LOAD_REG(index) (&reg_base[(index)])
-#define LOAD_CONST(index) (&const_base[(index) - MAX_FUNC_REGS - 1])
-#define LOAD_REG_OR_CONST(index) \
-    (((index) < MAX_FUNC_REGS) ? (&reg_base[(index)]) : (&const_base[(index) - MAX_FUNC_REGS - 1]))
 
     // --- decode fields (kept in locals)
     uint32_t op = 0;
@@ -665,6 +642,8 @@ int fh_run_vm(struct fh_vm *vm) {
         [OPC_DEC] = &&op_DEC,
 
         [OPC_ADD] = &&op_ADD,
+        [OPC_ADDF] = &&op_ADDF,
+        [OPC_ADDI] = &&op_ADDI,
         [OPC_SUB] = &&op_SUB,
         [OPC_MUL] = &&op_MUL,
         [OPC_DIV] = &&op_DIV,
@@ -687,7 +666,6 @@ int fh_run_vm(struct fh_vm *vm) {
         [OPC_APPEND] = &&op_APPEND,
     };
 
-    // --- fast dispatch macro
 #define DISPATCH() do { \
         uint32_t instr__ = *pc++; \
         op   = GET_INSTR_OP(instr__); \
@@ -700,10 +678,8 @@ int fh_run_vm(struct fh_vm *vm) {
         goto *dispatch[op]; \
     } while (0)
 
-    // Rebind on entry
 rebind_frame:
     frame = call_frame_stack_top(&vm->call_stack);
-    // (you assume frame exists here)
     const_base = frame->closure->func_def->consts;
     stack = vm->stack; // stack pointer can move after realloc
     reg_base = stack + frame->base;
@@ -770,7 +746,7 @@ op_GETEL: {
 
         switch (rb->type) {
             case FH_VAL_ARRAY: {
-                uint32_t idx;
+                int64_t idx;
                 if (vm_assert_index(vm, rc, &idx, "array") < 0)
                     goto user_err;
 
@@ -786,7 +762,7 @@ op_GETEL: {
                 break;
             }
             case FH_VAL_STRING: {
-                uint32_t idx;
+                int64_t idx;
                 if (vm_assert_index(vm, rc, &idx, "string") < 0)
                     goto user_err;
 
@@ -813,7 +789,7 @@ op_SETEL: {
         struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
 
         if (ra->type == FH_VAL_ARRAY) {
-            uint32_t idx;
+            int64_t idx;
             if (vm_assert_index(vm, rb, &idx, "array") < 0)
                 goto user_err;
 
@@ -985,11 +961,11 @@ op_BXOR: {
 
 op_INC: {
         struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
-        if (!fh_is_number_or_integer(rb)) {
+        if (!fh_is_number(rb)) {
             vm_error(vm, "increment on non-numeric value");
             goto user_err;
         }
-        if (fh_is_number(rb)) {
+        if (fh_is_float(rb)) {
             ra->type = FH_VAL_FLOAT;
             ra->data.num = rb->data.num + 1.0;
             DISPATCH();
@@ -1001,11 +977,11 @@ op_INC: {
 
 op_DEC: {
         struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
-        if (!fh_is_number_or_integer(rb)) {
-            vm_error(vm, "increment on non-numeric value");
+        if (!fh_is_number(rb)) {
+            vm_error(vm, "decrement on non-numeric value");
             goto user_err;
         }
-        if (fh_is_number(rb)) {
+        if (fh_is_float(rb)) {
             ra->type = FH_VAL_FLOAT;
             ra->data.num = rb->data.num - 1.0;
             DISPATCH();
@@ -1015,37 +991,51 @@ op_DEC: {
         DISPATCH();
     }
 
+op_ADDI: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+
+        if (!fh_is_integer(rb) || !fh_is_integer(rc)) {
+            vm_error(vm, "integer addition expects numeric values");
+            goto user_err;
+        }
+        ra->type = FH_VAL_INTEGER;
+        ra->data.i = rb->data.i + rc->data.i;
+        DISPATCH();
+    }
+
+op_ADDF: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+
+        if (!fh_is_float(rb) || !fh_is_float(rc)) {
+            vm_error(vm, "float addition expects numeric values");
+            goto user_err;
+        }
+        ra->type = FH_VAL_FLOAT;
+        ra->data.num = rb->data.num + rc->data.num;
+        DISPATCH();
+    }
+
 op_ADD: {
         struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
         struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
 
         if (fh_is_number(rb) && fh_is_number(rc)) {
+            // mixed int/float => float
             ra->type = FH_VAL_FLOAT;
-            ra->data.num = rb->data.num + rc->data.num;
-            DISPATCH();
-        }
-        if (fh_is_integer(rb) && fh_is_integer(rc)) {
-            ra->type = FH_VAL_INTEGER;
-            ra->data.i = rb->data.i + rc->data.i;
-            DISPATCH();
-        }
-        if (fh_is_number(rb) && fh_is_integer(rc)) {
-            ra->type = FH_VAL_FLOAT;
-            ra->data.num = rb->data.num + (double) rc->data.i;
-            DISPATCH();
-        }
-        if (fh_is_integer(rb) && fh_is_number(rc)) {
-            ra->type = FH_VAL_FLOAT;
-            ra->data.num = (double) rb->data.i + rc->data.num;
+            ra->data.num = fh_to_double(rb) + fh_to_double(rc);
             DISPATCH();
         }
 
+        // ---- string concatenations ----
         if (fh_is_string(rb) && fh_is_string(rc)) {
-            *ra = fh_add_string_string(vm->prog,GET_VAL_STRING(rb),GET_VAL_STRING(rc));
+            *ra = fh_add_string_string(vm->prog,GET_OBJ_STRING_DATA(GET_VAL_STRING(rb)),
+                                       GET_OBJ_STRING_DATA(GET_VAL_STRING(rc)));
             DISPATCH();
         }
 
-        if (fh_is_string(rb) && fh_is_number(rc)) {
+        if (fh_is_string(rb) && fh_is_float(rc)) {
             *ra = fh_add_string_float(vm->prog,GET_VAL_STRING(rb), rc->data.num);
             DISPATCH();
         }
@@ -1055,13 +1045,27 @@ op_ADD: {
             DISPATCH();
         }
 
-        if (fh_is_number(rb) && fh_is_string(rc)) {
+        if (fh_is_float(rb) && fh_is_string(rc)) {
             *ra = fh_add_float_string(vm->prog, rb->data.num,GET_VAL_STRING(rc));
             DISPATCH();
         }
 
         if (fh_is_integer(rb) && fh_is_string(rc)) {
             *ra = fh_add_integer_string(vm->prog, rb->data.i,GET_VAL_STRING(rc));
+            DISPATCH();
+        }
+
+        if (fh_is_bool(rb) && fh_is_string(rc)) {
+            *ra = fh_add_string_string(vm->prog,
+                                       rb->data.b != 0.0 ? "true" : "false",
+                                       GET_OBJ_STRING_DATA(GET_VAL_STRING(rc)));
+            DISPATCH();
+        }
+
+        if (fh_is_string(rb) && fh_is_bool(rc)) {
+            *ra = fh_add_string_string(vm->prog,
+                                       GET_OBJ_STRING_DATA(GET_VAL_STRING(rb)),
+                                       rc->data.b != 0.0 ? "true" : "false");
             DISPATCH();
         }
 

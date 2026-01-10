@@ -34,6 +34,8 @@ enum fh_bc_opcode {
     OPC_NEWMAP,
 
     OPC_ADD,
+    OPC_ADDI,
+    OPC_ADDF,
     OPC_SUB,
     OPC_MUL,
     OPC_DIV,

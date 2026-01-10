@@ -179,7 +179,16 @@ void fh_dump_bc_instr(struct fh_program *prog, int32_t addr, uint32_t instr) {
             dump_instr_up_rkb(instr);
             return;
 
-        case OPC_ADD: printf("add       ");
+        case OPC_ADD:
+            printf("add       ");
+            dump_instr_ra_rkb_rkc(instr);
+            return;
+        case OPC_ADDI:
+            printf("addi      ");
+            dump_instr_ra_rkb_rkc(instr);
+            return;
+        case OPC_ADDF:
+            printf("addf      ");
             dump_instr_ra_rkb_rkc(instr);
             return;
         case OPC_INC: printf("inc       ");
@@ -292,6 +301,7 @@ static void dump_const(struct fh_program *prog, struct fh_value *c) {
         case FH_VAL_FLOAT: printf("%f\n", c->data.num);
             return;
         case FH_VAL_INTEGER: printf("%lld\n", c->data.i);
+            return;
         case FH_VAL_STRING: dump_string(fh_get_string(c));
             printf("\n");
             return;

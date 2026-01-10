@@ -185,9 +185,9 @@ return fh_set_error((prog), "%s: expected %d argument(s), got %d", (fname), (n_e
 
 #define fh_is_null(v)                   ((v)->type == FH_VAL_NULL)
 #define fh_is_bool(v)                   ((v)->type == FH_VAL_BOOL)
-#define fh_is_number(v)                 ((v)->type == FH_VAL_FLOAT)
+#define fh_is_float(v)                  ((v)->type == FH_VAL_FLOAT)
 #define fh_is_integer(v)                ((v)->type == FH_VAL_INTEGER)
-#define fh_is_number_or_integer(v)      ((v)->type == FH_VAL_FLOAT || (v)->type == FH_VAL_INTEGER)
+#define fh_is_number(v)                 ((v)->type == FH_VAL_FLOAT || (v)->type == FH_VAL_INTEGER)
 #define fh_is_c_obj(v)                  ((v)->type == FH_VAL_C_OBJ)
 #define fh_is_c_func(v)                 ((v)->type == FH_VAL_C_FUNC)
 #define fh_is_string(v)                 ((v)->type == FH_VAL_STRING)
@@ -195,19 +195,21 @@ return fh_set_error((prog), "%s: expected %d argument(s), got %d", (fname), (n_e
 #define fh_is_array(v)                  ((v)->type == FH_VAL_ARRAY)
 #define fh_is_map(v)                    ((v)->type == FH_VAL_MAP)
 
-#define fh_new_null()     ((struct fh_value) { .type = FH_VAL_NULL })
+#define fh_to_double(v)                 (((v)->type == FH_VAL_INTEGER) ? (double)(v)->data.i : (v)->data.num)
 
-#define fh_new_bool(bv)   ((struct fh_value) { .type = FH_VAL_BOOL, .data = { .b = !!(bv) }})
-#define fh_get_bool(v)    ((v)->data.b)
+#define fh_new_null()                   ((struct fh_value) { .type = FH_VAL_NULL })
 
-#define fh_new_c_func(f)  ((struct fh_value) { .type = FH_VAL_C_FUNC, .data = { .c_func = (f) }})
-#define fh_get_c_func(v)  ((v)->data.c_func)
+#define fh_new_bool(bv)                 ((struct fh_value) { .type = FH_VAL_BOOL, .data = { .b = !!(bv) }})
+#define fh_get_bool(v)                  ((v)->data.b)
 
-#define fh_new_number(n)  ((struct fh_value) { .type = FH_VAL_FLOAT, .data = { .num = (n) }})
-#define fh_get_number(v)  ((v)->data.num)
+#define fh_new_c_func(f)                ((struct fh_value) { .type = FH_VAL_C_FUNC, .data = { .c_func = (f) }})
+#define fh_get_c_func(v)                ((v)->data.c_func)
 
-#define fh_new_integer(n)  ((struct fh_value) { .type = FH_VAL_INTEGER, .data = { .i = (n) }})
-#define fh_get_integer(v)  ((v)->data.i)
+#define fh_new_float(n)                ((struct fh_value) { .type = FH_VAL_FLOAT, .data = { .num = (n) }})
+#define fh_get_float(v)                ((v)->data.num)
+
+#define fh_new_integer(n)               ((struct fh_value) { .type = FH_VAL_INTEGER, .data = { .i = (n) }})
+#define fh_get_integer(v)               ((v)->data.i)
 
 struct fh_value fh_new_c_obj(struct fh_program *prog, void *ptr, fh_c_obj_gc_callback callback, int type);
 
