@@ -726,6 +726,50 @@ static bool is_test_bin_op(struct fh_p_expr_bin_op *expr) {
     }
 }
 
+static int compile_postfix_incdec_discard(struct fh_compiler *c, struct fh_p_expr_postfix *pf) {
+    struct fh_p_expr *arg = pf->arg;
+    const struct fh_src_loc loc = arg->loc;
+
+    if (arg->type != EXPR_VAR && arg->type != EXPR_INDEX)
+        return fh_compiler_error(c, loc, "postfix ++/-- expects a variable or index");
+
+    // FAST PATH: local var in reg => just INC/DEC in place
+    if (arg->type == EXPR_VAR) {
+        const int var_reg = get_var_reg(c, loc, arg->data.var);
+        if (var_reg >= 0) {
+            const enum fh_bc_opcode incdec = (pf->op == AST_OP_PRE_INC) ? OPC_INC : OPC_DEC;
+
+            if (add_instr(c, loc, MAKE_INSTR_AB(incdec, var_reg, var_reg)) < 0)
+                return -1;
+
+            struct func_info *fi = get_cur_func_info(c, loc);
+            const uint8_t hv = hint_of_rk(c, fi, var_reg);
+            set_reg_hint(fi, var_reg, hv);
+
+            return 0;
+        }
+    }
+
+    // GENERIC PATH (index / upval / anything else): load -> inc/dec -> store back
+    const int tmp = alloc_reg(c, loc, TMP_VARIABLE);
+    if (tmp < 0) return -1;
+
+    if (compile_load_lvalue_to_reg(c, arg, tmp) < 0) return -1;
+
+    const enum fh_bc_opcode incdec = (pf->op == AST_OP_PRE_INC) ? OPC_INC : OPC_DEC;
+    if (add_instr(c, loc, MAKE_INSTR_AB(incdec, tmp, tmp)) < 0) return -1;
+
+    // update hint for tmp (numeric stays numeric)
+    struct func_info *fi2 = get_cur_func_info(c, loc);
+    const uint8_t ht_before = hint_of_rk(c, fi2, tmp);
+    const uint8_t ht_after = (ht_before == H_FLOAT) ? H_FLOAT : (ht_before == H_INT) ? H_INT : H_UNKNOWN;
+    set_reg_hint(fi2, tmp, ht_after);
+
+    if (compile_store_reg_to_lvalue(c, arg, tmp) < 0) return -1;
+
+    return 0;
+}
+
 static int compile_postfix_incdec_to_reg(struct fh_compiler *c, struct fh_p_expr_postfix *pf, int dest_reg) {
     struct fh_p_expr *arg = pf->arg;
     const struct fh_src_loc loc = arg->loc;
@@ -733,6 +777,45 @@ static int compile_postfix_incdec_to_reg(struct fh_compiler *c, struct fh_p_expr
     if (arg->type != EXPR_VAR && arg->type != EXPR_INDEX)
         return fh_compiler_error(c, loc, "postfix ++/-- expects a variable or index");
 
+    /*
+     * FAST PATH: local variable in a register.
+     *
+     * postfix semantics:
+     *   dest = old
+     *   var  = var +/- 1
+     *
+     * This avoids tmp + load/store for the common case `x++` where `x` is local.
+     */
+    if (arg->type == EXPR_VAR) {
+        const int var_reg = get_var_reg(c, loc, arg->data.var);
+        if (var_reg >= 0) {
+            const enum fh_bc_opcode incdec = (pf->op == AST_OP_PRE_INC) ? OPC_INC : OPC_DEC;
+
+            // If dest_reg == var_reg, we can't return OLD and also mutate in-place without a tmp.
+            // Fall back to generic path.
+            if (dest_reg != var_reg) {
+                // dest = old
+                if (add_instr(c, loc, MAKE_INSTR_AB(OPC_MOV, dest_reg, var_reg)) < 0)
+                    return -1;
+
+                // var = var +/- 1
+                if (add_instr(c, loc, MAKE_INSTR_AB(incdec, var_reg, var_reg)) < 0)
+                    return -1;
+
+                // hints: dest has old hint, var stays numeric hint
+                struct func_info *fi = get_cur_func_info(c, loc);
+                const uint8_t hv = hint_of_rk(c, fi, var_reg);
+                set_reg_hint(fi, dest_reg, hv);
+                set_reg_hint(fi, var_reg, hv);
+
+                return dest_reg;
+            }
+        }
+    }
+
+    /*
+     * GENERIC PATH: works for indexes + upvals + anything not a local var reg.
+     */
     const int tmp = alloc_reg(c, loc, TMP_VARIABLE);
     if (tmp < 0) return -1;
 
@@ -743,6 +826,7 @@ static int compile_postfix_incdec_to_reg(struct fh_compiler *c, struct fh_p_expr
     if (add_instr(c, loc, MAKE_INSTR_AB(OPC_MOV, dest_reg, tmp)) < 0) return -1;
 
     // tmp = old +/- 1
+    // NOTE: keep your existing op check to match your AST encoding.
     const enum fh_bc_opcode opc = (pf->op == AST_OP_PRE_INC) ? OPC_INC : OPC_DEC;
     if (add_instr(c, loc, MAKE_INSTR_AB(opc, tmp, tmp)) < 0) return -1;
 
@@ -1148,6 +1232,23 @@ static int compile_un_op(struct fh_compiler *c, const struct fh_src_loc loc, str
     const int dest_reg = alloc_reg(c, loc, TMP_VARIABLE);
     if (dest_reg < 0) return -1;
     return compile_un_op_to_reg(c, loc, expr, dest_reg);
+}
+
+static int compile_expr_discard(struct fh_compiler *c, struct fh_p_expr *expr) {
+    if (!expr) return 0;
+
+    if (expr->type == EXPR_UN_OP) {
+        struct fh_p_expr_un_op *u = &expr->data.un_op;
+        if (u->op == AST_OP_PRE_INC || u->op == AST_OP_PRE_DEC) {
+            return compile_un_op_to_reg(c, expr->loc, u, -1);
+        }
+    }
+
+    if (expr->type == EXPR_POST_INC || expr->type == EXPR_POST_DEC) {
+        return compile_postfix_incdec_discard(c, &expr->data.postfix);
+    }
+
+    return compile_expr(c, expr);
 }
 
 static const char *try_get_called_name(struct fh_compiler *c, struct fh_p_expr *callee) {
@@ -1999,7 +2100,7 @@ static int compile_stmt(struct fh_compiler *c, struct fh_p_stmt *stmt) {
             return 0;
 
         case STMT_EXPR:
-            if (compile_expr(c, stmt->data.expr) < 0)
+            if (compile_expr_discard(c, stmt->data.expr) < 0)
                 return -1;
             free_tmp_regs(c, stmt->loc);
             return 0;
