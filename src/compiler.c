@@ -1125,10 +1125,28 @@ static int compile_un_op_to_reg(struct fh_compiler *c, struct fh_src_loc loc, st
     return dest_reg;
 }
 
-static int compile_un_op(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_expr_un_op *expr) {
-    int dest_reg = alloc_reg(c, loc, TMP_VARIABLE);
-    if (dest_reg < 0)
-        return -1;
+static int compile_un_op(struct fh_compiler *c, const struct fh_src_loc loc, struct fh_p_expr_un_op *expr) {
+    if (expr->op == AST_OP_PRE_INC || expr->op == AST_OP_PRE_DEC) {
+        if (expr->arg->type == EXPR_VAR) {
+            const int var_reg = get_var_reg(c, loc, expr->arg->data.var);
+            if (var_reg >= 0) {
+                const enum fh_bc_opcode incdec = (expr->op == AST_OP_PRE_INC) ? OPC_INC : OPC_DEC;
+
+                if (add_instr(c, loc, MAKE_INSTR_AB(incdec, var_reg, var_reg)) < 0)
+                    return -1;
+
+                struct func_info *fi = get_cur_func_info(c, loc);
+                const uint8_t hv = hint_of_rk(c, fi, var_reg);
+                set_reg_hint(fi, var_reg, hv);
+
+                return var_reg;
+            }
+        }
+        // else: EXPR_INDEX, upval, etc -> fall through to generic path (needs tmp + store-back)
+    }
+
+    const int dest_reg = alloc_reg(c, loc, TMP_VARIABLE);
+    if (dest_reg < 0) return -1;
     return compile_un_op_to_reg(c, loc, expr, dest_reg);
 }
 

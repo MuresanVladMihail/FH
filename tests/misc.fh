@@ -1,7 +1,6 @@
 fn id(v) { return v; }
 
 fn main() {
-    let i = 1;
-    ++i;
-    println(++i);
+    let i = 0;
+    i++;
 }
