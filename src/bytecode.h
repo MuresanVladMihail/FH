@@ -87,11 +87,70 @@ enum fh_bc_opcode {
 #define INSTR_RU_MASK         ((uint32_t)0x3ffff<<14)
 #define INSTR_RS_MASK         INSTR_RU_MASK
 
-#define MAKE_INSTR_A(op, ra)            (PLACE_INSTR_OP(op) | PLACE_INSTR_RA(ra))
-#define MAKE_INSTR_AB(op, ra, rb)       (PLACE_INSTR_OP(op) | PLACE_INSTR_RA(ra) | PLACE_INSTR_RB(rb))
-#define MAKE_INSTR_ABC(op, ra, rb, rc)  (PLACE_INSTR_OP(op) | PLACE_INSTR_RA(ra) | PLACE_INSTR_RB(rb) | PLACE_INSTR_RC(rc))
-#define MAKE_INSTR_AU(op, ra, ru)       (PLACE_INSTR_OP(op) | PLACE_INSTR_RA(ra) | PLACE_INSTR_RU(ru))
-#define MAKE_INSTR_AS(op, ra, rs)       (PLACE_INSTR_OP(op) | PLACE_INSTR_RA(ra) | PLACE_INSTR_RS(rs))
+// ============================================================
+// Instruction encoding helpers
+// ------------------------------------------------------------
+// Every bytecode instruction is a 32-bit word.
+//
+// Layout (bit positions):
+//
+//   31 ......... 23 22 ......... 14 13 ..... 6 5 ..... 0
+//   [     RC     ][     RB     ][   RA   ][  OPCODE ]
+//
+//   OPCODE : 6 bits  (what operation to execute)
+//   RA     : 8 bits  (destination register or primary operand)
+//   RB     : 9 bits  (secondary register or constant reference)
+//   RC     : 9 bits  (third register or constant reference)
+//
+// Not all instructions need all fields,
+// so we provide multiple packing macros for convenience.
+// ============================================================
+
+
+// Format: [ OPCODE | RA ]
+// Used for instructions with a single register operand.
+// Example: RET r0, NEG r3, NOT r5
+#define MAKE_INSTR_A(op, ra) \
+    (PLACE_INSTR_OP(op) | PLACE_INSTR_RA(ra))
+
+
+// Format: [ OPCODE | RA | RB ]
+// Used for instructions with two register operands.
+// Example: MOV r1, r2   => r1 = r2
+//          INC r3, r3   => r3 = r3 + 1
+#define MAKE_INSTR_AB(op, ra, rb) \
+    (PLACE_INSTR_OP(op) | PLACE_INSTR_RA(ra) | PLACE_INSTR_RB(rb))
+
+
+// Format: [ OPCODE | RA | RB | RC ]
+// Used for classic three-operand instructions.
+// Example: ADD r0, r1, r2   => r0 = r1 + r2
+//          MUL r3, r4, r5   => r3 = r4 * r5
+#define MAKE_INSTR_ABC(op, ra, rb, rc) \
+    (PLACE_INSTR_OP(op) | PLACE_INSTR_RA(ra) | PLACE_INSTR_RB(rb) | PLACE_INSTR_RC(rc))
+
+
+// Format: [ OPCODE | RA | RU ]
+// RU = unsigned immediate value (18 bits, overlaps RB+RC space).
+// Used when an instruction needs a larger immediate value.
+// Example: LDC r0, const_index
+//          CALL r2, arg_count
+//          NEWARRAY r1, element_count
+#define MAKE_INSTR_AU(op, ra, ru) \
+    (PLACE_INSTR_OP(op) | PLACE_INSTR_RA(ra) | PLACE_INSTR_RU(ru))
+
+
+// Format: [ OPCODE | RA | RS ]
+// RS = signed immediate value (18 bits, overlaps RB+RC space).
+// Used for relative jumps.
+// Example: JMP +12   (jump forward 12 instructions)
+//          JMP -5    (jump backward 5 instructions)
+#define MAKE_INSTR_AS(op, ra, rs) \
+    (PLACE_INSTR_OP(op) | PLACE_INSTR_RA(ra) | PLACE_INSTR_RS(rs))
+
+// ============================================================
+// End of instruction packing macros
+// ============================================================
 
 void fh_dump_bc_instr(struct fh_program *prog, int32_t addr, uint32_t instr);
 

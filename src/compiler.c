@@ -695,7 +695,7 @@ static int compile_var(struct fh_compiler *c, struct fh_src_loc loc, fh_symbol_i
     if (add_var_upval(c, loc, var, &upval) < 0)
         return -1;
     if (upval >= 0) {
-        int reg = alloc_reg(c, loc, TMP_VARIABLE);
+        const int reg = alloc_reg(c, loc, TMP_VARIABLE);
         if (reg < 0)
             return -1;
         if (add_instr(c, loc, MAKE_INSTR_AB(OPC_GETUPVAL, reg, upval)) < 0)
@@ -1038,7 +1038,58 @@ static int compile_bin_op(struct fh_compiler *c, struct fh_src_loc loc, struct f
 
 static int compile_un_op_to_reg(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_expr_un_op *expr,
                                 int dest_reg) {
-    int arg_rk = compile_expr(c, expr->arg);
+    if (expr->op == AST_OP_PRE_INC || expr->op == AST_OP_PRE_DEC) {
+        if (expr->arg->type != EXPR_VAR && expr->arg->type != EXPR_INDEX)
+            return fh_compiler_error(c, loc, "%s operator can only be applied to variables or indexes",
+                                     expr->op == AST_OP_PRE_INC ? "increment" : "decrement");
+
+        if (expr->arg->type == EXPR_VAR) {
+            const int var_reg = get_var_reg(c, loc, expr->arg->data.var);
+            if (var_reg >= 0) {
+                const enum fh_bc_opcode incdec = (expr->op == AST_OP_PRE_INC) ? OPC_INC : OPC_DEC;
+
+                if (add_instr(c, loc, MAKE_INSTR_AB(incdec, var_reg, var_reg)) < 0)
+                    return -1;
+
+                struct func_info *fi = get_cur_func_info(c, loc);
+                const uint8_t hv = hint_of_rk(c, fi, var_reg);
+                set_reg_hint(fi, var_reg, hv);
+
+                // If no result is needed, we are done.
+                if (dest_reg < 0) return 0;
+                // If result is needed, return it (either same reg or MOV)
+                if (dest_reg == var_reg) return dest_reg;
+
+                set_reg_hint(fi, dest_reg, hv);
+                if (add_instr(c, loc, MAKE_INSTR_AB(OPC_MOV, dest_reg, var_reg)) < 0)
+                    return -1;
+                return dest_reg;
+            }
+        }
+
+        const int tmp = alloc_reg(c, loc, TMP_VARIABLE);
+        if (tmp < 0) return -1;
+
+        if (compile_load_lvalue_to_reg(c, expr->arg, tmp) < 0) return -1;
+
+        enum fh_bc_opcode incdec = (expr->op == AST_OP_PRE_INC) ? OPC_INC : OPC_DEC;
+        if (add_instr(c, loc, MAKE_INSTR_AB(incdec, tmp, tmp)) < 0) return -1;
+
+        struct func_info *fi2 = get_cur_func_info(c, loc);
+        const uint8_t ht_before = hint_of_rk(c, fi2, tmp);
+        const uint8_t ht_after = (ht_before == H_FLOAT) ? H_FLOAT : (ht_before == H_INT) ? H_INT : H_UNKNOWN;
+        set_reg_hint(fi2, tmp, ht_after);
+        if (compile_store_reg_to_lvalue(c, expr->arg, tmp) < 0) return -1;
+
+        if (dest_reg < 0) return 0;
+
+        set_reg_hint(fi2, dest_reg, ht_after);
+        if (add_instr(c, loc, MAKE_INSTR_AB(OPC_MOV, dest_reg, tmp)) < 0) return -1;
+        return dest_reg;
+    }
+
+
+    const int arg_rk = compile_expr(c, expr->arg);
     if (arg_rk < 0) {
         return -1;
     }
@@ -1047,9 +1098,6 @@ static int compile_un_op_to_reg(struct fh_compiler *c, struct fh_src_loc loc, st
     enum fh_bc_opcode opc;
     switch (expr->op) {
         case '~': {
-            struct func_info *fi = get_cur_func_info(c, loc);
-            const uint8_t ha = hint_of_rk(c, fi, arg_rk);
-
             if (ha == H_FLOAT)
                 return fh_compiler_error(c, loc, "bitwise not expects integer");
 
@@ -1069,34 +1117,6 @@ static int compile_un_op_to_reg(struct fh_compiler *c, struct fh_src_loc loc, st
 
             set_reg_hint(fi, dest_reg, ht_after);
             break;
-        case AST_OP_PRE_INC:
-        case AST_OP_PRE_DEC: {
-            if (expr->arg->type != EXPR_VAR && expr->arg->type != EXPR_INDEX)
-                return fh_compiler_error(c, loc, "%s operator can only be applied to variables or indexes",
-                                         expr->op == AST_OP_PRE_INC ? "increment" : "decrement");
-
-            const int tmp = alloc_reg(c, loc, TMP_VARIABLE);
-            if (tmp < 0) return -1;
-
-            if (compile_load_lvalue_to_reg(c, expr->arg, tmp) < 0) return -1;
-
-            enum fh_bc_opcode incdec = (expr->op == AST_OP_PRE_INC) ? OPC_INC : OPC_DEC;
-            if (add_instr(c, loc, MAKE_INSTR_AB(incdec, tmp, tmp)) < 0) return -1;
-
-            struct func_info *fi2 = get_cur_func_info(c, loc);
-            const uint8_t ht_before = hint_of_rk(c, fi2, tmp);
-            uint8_t ht_after = H_UNKNOWN;
-            if (ht_before == H_FLOAT) ht_after = H_FLOAT;
-            else if (ht_before == H_INT) ht_after = H_INT;
-
-            set_reg_hint(fi2, tmp, ht_after);
-
-            if (compile_store_reg_to_lvalue(c, expr->arg, tmp) < 0) return -1;
-
-            set_reg_hint(fi2, dest_reg, ht_after);
-            if (add_instr(c, loc, MAKE_INSTR_AB(OPC_MOV, dest_reg, tmp)) < 0) return -1;
-            return dest_reg;
-        }
         default:
             return fh_compiler_error(c, loc, "unknown operator '%s'", fh_get_op_name(expr->op));
     }
