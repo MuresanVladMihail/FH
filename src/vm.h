@@ -18,6 +18,16 @@ DECLARE_STACK(call_frame_stack, struct fh_vm_call_frame);
 
 struct fh_program;
 
+// Hot loop tracking for trace-style optimization
+#define MAX_HOT_LOOPS 32
+#define HOT_LOOP_THRESHOLD 100  // Lower threshold for faster activation
+
+struct fh_hot_loop {
+    uint32_t *loop_start_pc;  // PC where loop begins
+    uint32_t exec_count;       // Execution count
+    bool is_hot;               // Above threshold?
+};
+
 struct fh_vm {
     struct fh_program *prog;
     struct fh_value *stack;
@@ -29,6 +39,11 @@ struct fh_vm {
     int last_error_addr;
     int last_error_frame_index;
     struct fh_value char_cache[256];
+
+    // Hot loop optimization tracking
+    struct fh_hot_loop hot_loops[MAX_HOT_LOOPS];
+    int num_hot_loops;
+    bool in_hot_loop;          // Currently executing hot loop?
 };
 
 void fh_init_vm(struct fh_vm *vm, struct fh_program *prog);

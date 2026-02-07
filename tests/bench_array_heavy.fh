@@ -1,0 +1,21 @@
+# Pure array access benchmark - tests hot loop optimization
+
+fn main() {
+    let arr = [];
+    for (let i = 0; i < 10000; i++) {
+        append(arr, i);
+    }
+
+    let start = os_time();
+    let sum = 0;
+
+    # Hot loop: pure array access, should be ~10x faster with optimization
+    for (let iter = 0; iter < 100000; iter++) {
+        sum = sum + arr[iter % 10000];
+    }
+
+    let end = os_time();
+    let diff = os_difftime(start, end);
+
+    printf("Sum: %d in %d ms\n", sum, diff);
+}

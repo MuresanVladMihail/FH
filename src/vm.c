@@ -144,6 +144,34 @@ static inline struct fh_value fh_add_float_string(struct fh_program *prog, const
     return v;
 }
 
+static inline struct fh_value fh_add_string_string_objs(struct fh_program *prog, struct fh_string *sa_obj, struct fh_string *sb_obj) {
+    const char *sa = GET_OBJ_STRING_DATA(sa_obj);
+    const char *sb = GET_OBJ_STRING_DATA(sb_obj);
+    const size_t la = sa_obj->size - 1;  // size includes null terminator
+    const size_t lb = sb_obj->size - 1;
+    const size_t len = la + lb + 1;
+
+    if (len <= FH_MAXSHORTLEN) {
+        char buf[FH_MAXSHORTLEN];
+        memcpy(buf, sa, la);
+        memcpy(buf + la, sb, lb + 1);
+        return fh_new_string(prog, buf);
+    }
+
+    char *heap = malloc(len);
+    if (!heap) {
+        fh_set_error(prog, "out of memory");
+        return fh_new_null();
+    }
+
+    memcpy(heap, sa, la);
+    memcpy(heap + la, sb, lb + 1);
+
+    const struct fh_value v = fh_new_string(prog, heap);
+    free(heap);
+    return v;
+}
+
 static inline struct fh_value fh_add_string_string(struct fh_program *prog, const char *sa, const char *sb) {
     const size_t la = strlen(sa);
     const size_t lb = strlen(sb);
@@ -195,6 +223,11 @@ void fh_init_vm(struct fh_vm *vm, struct fh_program *prog) {
     vm->last_error_frame_index = -1;
     call_frame_stack_init_cap(&vm->call_stack, 8192);
     fh_init_char_cache(vm);
+
+    // Initialize hot loop tracking
+    vm->num_hot_loops = 0;
+    vm->in_hot_loop = false;
+    memset(vm->hot_loops, 0, sizeof(vm->hot_loops));
 }
 
 void fh_destroy_vm(struct fh_vm *vm) {
@@ -247,13 +280,48 @@ static struct fh_vm_call_frame *prepare_call(struct fh_vm *vm, struct fh_closure
     const int base = ret_reg + 1;
 
     // Args are already copied into [base .. base+n_args)
-    // Only mark remaining regs as NULL (cheaper than memset full structs)
+    // Only mark remaining regs as NULL
     if (n_args < func_def->n_regs) {
         struct fh_value *p = vm->stack + base + n_args;
         const int count = func_def->n_regs - n_args;
-        for (int i = 0; i < count; i++) {
-            p[i].type = FH_VAL_NULL;
-            p[i].data.obj = NULL;
+
+        // Fast path for common small counts (unrolled)
+        switch (count) {
+            case 1:
+                p[0].type = FH_VAL_NULL;
+                p[0].data.obj = NULL;
+                break;
+            case 2:
+                p[0].type = FH_VAL_NULL;
+                p[0].data.obj = NULL;
+                p[1].type = FH_VAL_NULL;
+                p[1].data.obj = NULL;
+                break;
+            case 3:
+                p[0].type = FH_VAL_NULL;
+                p[0].data.obj = NULL;
+                p[1].type = FH_VAL_NULL;
+                p[1].data.obj = NULL;
+                p[2].type = FH_VAL_NULL;
+                p[2].data.obj = NULL;
+                break;
+            case 4:
+                p[0].type = FH_VAL_NULL;
+                p[0].data.obj = NULL;
+                p[1].type = FH_VAL_NULL;
+                p[1].data.obj = NULL;
+                p[2].type = FH_VAL_NULL;
+                p[2].data.obj = NULL;
+                p[3].type = FH_VAL_NULL;
+                p[3].data.obj = NULL;
+                break;
+            default:
+                // Fallback to loop for larger counts
+                for (int i = 0; i < count; i++) {
+                    p[i].type = FH_VAL_NULL;
+                    p[i].data.obj = NULL;
+                }
+                break;
         }
     }
 
@@ -375,16 +443,7 @@ static inline bool fh_double_is_finite(const double d) {
     return (x.u & 0x7ff0000000000000ULL) != 0x7ff0000000000000ULL;
 }
 
-static bool fh_num_equals_int64(const double d, const int64_t i) {
-    if (!fh_double_is_finite(d)) return false;
-
-    const double id = (double) i;
-    if (id != d) return false;
-
-    return (int64_t) d == i;
-}
-
-static bool vals_are_equali(struct fh_value *v1, struct fh_value *v2) {
+static inline bool vals_are_equali(struct fh_value *v1, struct fh_value *v2) {
     if (v1->type == FH_VAL_UPVAL)
         v1 = GET_OBJ_UPVAL(v1)->val;
     if (v2->type == FH_VAL_UPVAL)
@@ -396,7 +455,7 @@ static bool vals_are_equali(struct fh_value *v1, struct fh_value *v2) {
     return fh_get_integer(v1) == fh_get_integer(v2);
 }
 
-static bool vals_are_equalf(struct fh_value *v1, struct fh_value *v2) {
+static inline bool vals_are_equalf(struct fh_value *v1, struct fh_value *v2) {
     if (v1->type == FH_VAL_UPVAL)
         v1 = GET_OBJ_UPVAL(v1)->val;
     if (v2->type == FH_VAL_UPVAL)
@@ -416,21 +475,18 @@ bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
         v2 = GET_OBJ_UPVAL(v2)->val;
 
     if (v1->type != v2->type) {
-        if (fh_is_float(v1) && fh_is_integer(v2)) {
-            return fh_num_equals_int64(v1->data.num, v2->data.i);
-        }
-        if (fh_is_integer(v1) && fh_is_float(v2)) {
-            return fh_num_equals_int64(v2->data.num, v1->data.i);
+        if (fh_is_number(v1) && fh_is_number(v2)) {
+            return fh_to_double(v1) == fh_to_double(v2);
         }
         return false;
     }
 
     switch (v1->type) {
-        case FH_VAL_NULL: return true;
-        case FH_VAL_BOOL: return v1->data.b == v2->data.b;
         case FH_VAL_FLOAT: return v1->data.num == v2->data.num;
         case FH_VAL_INTEGER: return v1->data.i == v2->data.i;
         case FH_VAL_C_FUNC: return v1->data.c_func == v2->data.c_func;
+        case FH_VAL_BOOL: return v1->data.b == v2->data.b;
+        case FH_VAL_NULL: return true;
         case FH_VAL_UPVAL: return false;
         case FH_VAL_C_OBJ:
         case FH_VAL_ARRAY:
@@ -440,10 +496,10 @@ bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
             return v1->data.obj == v2->data.obj;
 
         case FH_VAL_STRING: {
+            if (v1->data.obj == v2->data.obj) return true;
+
             const struct fh_string *s1 = GET_VAL_STRING(v1);
             const struct fh_string *s2 = GET_VAL_STRING(v2);
-
-            if (v1->data.obj == v2->data.obj) return true;
 
             if (s1->hash != s2->hash || s1->size != s2->size)
                 return false;
@@ -451,7 +507,7 @@ bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
             const char *p1 = GET_OBJ_STRING_DATA(v1->data.obj);
             const char *p2 = GET_OBJ_STRING_DATA(v2->data.obj);
 
-            return memcmp(p1, p2, (size_t) s1->size) == 0;
+            return memcmp(p1, p2, s1->size) == 0;
         }
     }
     return false;
@@ -459,6 +515,7 @@ bool fh_vals_are_equal(struct fh_value *v1, struct fh_value *v2) {
 
 static inline int vm_assert_index(struct fh_vm *vm, const struct fh_value *idx_val, int64_t *out,
                                   const char *what) {
+    // Fast path: check both conditions with single comparison
     if (idx_val->type != FH_VAL_INTEGER) {
         vm_error(vm, "invalid %s access (non-integer index)", what);
         return -1;
@@ -466,7 +523,8 @@ static inline int vm_assert_index(struct fh_vm *vm, const struct fh_value *idx_v
 
     const int64_t n = idx_val->data.i;
 
-    if (n < 0) {
+    // Use unsigned comparison to check negative in one branch
+    if ((uint64_t)n > (uint64_t)INT64_MAX) {
         vm_error(vm, "invalid %s access (index is negative)", what);
         return -1;
     }
@@ -655,6 +713,8 @@ int fh_run_vm(struct fh_vm *vm) {
         [OPC_MOV] = &&op_MOV,
         [OPC_RET] = &&op_RET,
         [OPC_GETEL] = &&op_GETEL,
+        [OPC_GETEL_ARRAY] = &&op_GETEL_ARRAY,
+        [OPC_GETEL_MAP] = &&op_GETEL_MAP,
         [OPC_SETEL] = &&op_SETEL,
         [OPC_NEWARRAY] = &&op_NEWARRAY,
         [OPC_NEWMAP] = &&op_NEWMAP,
@@ -676,8 +736,14 @@ int fh_run_vm(struct fh_vm *vm) {
         [OPC_ADDF] = &&op_ADDF,
         [OPC_ADDI] = &&op_ADDI,
         [OPC_SUB] = &&op_SUB,
+        [OPC_SUBI] = &&op_SUBI,
+        [OPC_SUBF] = &&op_SUBF,
         [OPC_MUL] = &&op_MUL,
+        [OPC_MULI] = &&op_MULI,
+        [OPC_MULF] = &&op_MULF,
         [OPC_DIV] = &&op_DIV,
+        [OPC_DIVI] = &&op_DIVI,
+        [OPC_DIVF] = &&op_DIVF,
         [OPC_MOD] = &&op_MOD,
         [OPC_NEG] = &&op_NEG,
         [OPC_NOT] = &&op_NOT,
@@ -785,9 +851,68 @@ op_RET: {
         goto rebind_frame;
     }
 
+op_GETEL_ARRAY: {
+        // Specialized fast path for array indexing
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+
+        // Fast path: assume types are correct (fallback to generic if wrong)
+        if (rb->type != FH_VAL_ARRAY || rc->type != FH_VAL_INTEGER) {
+            goto op_GETEL;  // Type hint was wrong, use generic path
+        }
+
+        const int64_t idx = rc->data.i;
+
+        // Fast negative check using unsigned comparison
+        if ((uint64_t)idx > (uint64_t)INT64_MAX) {
+            vm_error(vm, "invalid array access (index is negative)");
+            goto user_err;
+        }
+
+        const struct fh_array *arr = GET_OBJ_ARRAY(rb->data.obj);
+        if ((uint64_t)idx < (uint64_t)arr->len) {
+            *ra = arr->items[idx];
+        } else {
+            ra->type = FH_VAL_NULL;
+        }
+        DISPATCH();
+    }
+
+op_GETEL_MAP: {
+        // Specialized fast path for map indexing
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+
+        // Fast path: assume type is correct
+        if (rb->type != FH_VAL_MAP) {
+            goto op_GETEL;  // Type hint was wrong, use generic path
+        }
+
+        if (fh_get_map_value(rb, rc, ra) < 0) {
+            *ra = fh_new_null();
+        }
+        DISPATCH();
+    }
+
 op_GETEL: {
         struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
         struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+
+        // HOT LOOP FAST PATH: Assume array[int] pattern (most common in hot loops)
+        // This eliminates ~5 checks and branches per array access
+        if (vm->in_hot_loop) {
+            // Guard: check assumptions are valid
+            if (rb->type == FH_VAL_ARRAY && rc->type == FH_VAL_INTEGER && rc->data.i >= 0) {
+                const struct fh_array *arr = GET_OBJ_ARRAY(rb->data.obj);
+                const int64_t idx = rc->data.i;
+                if ((uint64_t)idx < (uint64_t)arr->len) {
+                    *ra = arr->items[idx];
+                    DISPATCH();
+                }
+                // Index out of bounds - fall through to generic path for null handling
+            }
+            // Guard failed - fall through to generic path
+        }
 
         switch (rb->type) {
             case FH_VAL_ARRAY: {
@@ -1040,32 +1165,33 @@ op_ADDI: {
         struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
         struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
 
-        if (!fh_is_integer(rb) || !fh_is_integer(rc)) {
-            vm_error(vm, "integer addition expects numeric values");
-            goto user_err;
+        // Fast path: both are integers as expected
+        if (fh_is_integer(rb) && fh_is_integer(rc)) {
+            ra->type = FH_VAL_INTEGER;
+            ra->data.i = rb->data.i + rc->data.i;
+            DISPATCH();
         }
-        ra->type = FH_VAL_INTEGER;
-        ra->data.i = rb->data.i + rc->data.i;
-        DISPATCH();
+        // Fallback: type hint was wrong, use generic ADD logic
+        goto op_ADD;
     }
 
 op_ADDF: {
         struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
         struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
 
-        if (!fh_is_float(rb) || !fh_is_float(rc)) {
-            vm_error(vm, "float addition expects numeric values");
-            goto user_err;
+        // Fast path: both are floats as expected
+        if (fh_is_float(rb) && fh_is_float(rc)) {
+            ra->type = FH_VAL_FLOAT;
+            ra->data.num = rb->data.num + rc->data.num;
+            DISPATCH();
         }
-        ra->type = FH_VAL_FLOAT;
-        ra->data.num = rb->data.num + rc->data.num;
-        DISPATCH();
+        // Fallback: type hint was wrong, use generic ADD logic
+        goto op_ADD;
     }
 
 op_ADD: {
         struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
         struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
-
 
         if (fh_is_number(rb) && fh_is_number(rc)) {
             // int + int -> int
@@ -1091,46 +1217,56 @@ op_ADD: {
         }
 
         // ---- string concatenations ----
-        if (fh_is_string(rb) && fh_is_string(rc)) {
-            *ra = fh_add_string_string(vm->prog,GET_OBJ_STRING_DATA(GET_VAL_STRING(rb)),
-                                       GET_OBJ_STRING_DATA(GET_VAL_STRING(rc)));
-            DISPATCH();
+        if (fh_is_string(rb)) {
+            switch (rc->type) {
+                case FH_VAL_STRING: {
+                    *ra = fh_add_string_string_objs(vm->prog, GET_VAL_STRING(rb), GET_VAL_STRING(rc));
+                    DISPATCH();
+                }
+                case FH_VAL_INTEGER: {
+                    *ra = fh_add_string_integer(vm->prog,GET_VAL_STRING(rb), rc->data.i);
+                    DISPATCH();
+                }
+                case FH_VAL_FLOAT: {
+                    *ra = fh_add_string_float(vm->prog,GET_VAL_STRING(rb), rc->data.num);
+                    DISPATCH();
+                }
+                case FH_VAL_BOOL: {
+                    *ra = fh_add_string_string(vm->prog,GET_OBJ_STRING_DATA(GET_VAL_STRING(rb)),
+                                               rc->data.b != 0 ? "true" : "false");
+                    DISPATCH();
+                }
+                default: {
+                    vm_error(vm, "string addition with unsupported type %s", fh_type_to_str(vm->prog, rc->type));
+                    DISPATCH();
+                }
+            }
         }
 
-        if (fh_is_string(rb) && fh_is_float(rc)) {
-            *ra = fh_add_string_float(vm->prog,GET_VAL_STRING(rb), rc->data.num);
-            DISPATCH();
-        }
+        if (fh_is_string(rc)) {
+            switch (rb->type) {
+                case FH_VAL_FLOAT: {
+                    *ra = fh_add_float_string(vm->prog, rb->data.num,GET_VAL_STRING(rc));
+                    DISPATCH();
+                }
+                case FH_VAL_BOOL: {
+                    *ra = fh_add_string_string(vm->prog,
+                                               rb->data.b != 0.0 ? "true" : "false",
+                                               GET_OBJ_STRING_DATA(GET_VAL_STRING(rc)));
+                    DISPATCH();
+                }
 
-        if (fh_is_string(rb) && fh_is_integer(rc)) {
-            *ra = fh_add_string_integer(vm->prog,GET_VAL_STRING(rb), rc->data.i);
-            DISPATCH();
+                case FH_VAL_INTEGER: {
+                    *ra = fh_add_integer_string(vm->prog, rb->data.i,GET_VAL_STRING(rc));
+                    DISPATCH();
+                }
+                default: {
+                    vm_error(vm, "%s addition with unsupported type %s", fh_type_to_str(vm->prog, rb->type),
+                             fh_type_to_str(vm->prog, rc->type));
+                    DISPATCH();
+                }
+            }
         }
-
-        if (fh_is_float(rb) && fh_is_string(rc)) {
-            *ra = fh_add_float_string(vm->prog, rb->data.num,GET_VAL_STRING(rc));
-            DISPATCH();
-        }
-
-        if (fh_is_integer(rb) && fh_is_string(rc)) {
-            *ra = fh_add_integer_string(vm->prog, rb->data.i,GET_VAL_STRING(rc));
-            DISPATCH();
-        }
-
-        if (fh_is_bool(rb) && fh_is_string(rc)) {
-            *ra = fh_add_string_string(vm->prog,
-                                       rb->data.b != 0.0 ? "true" : "false",
-                                       GET_OBJ_STRING_DATA(GET_VAL_STRING(rc)));
-            DISPATCH();
-        }
-
-        if (fh_is_string(rb) && fh_is_bool(rc)) {
-            *ra = fh_add_string_string(vm->prog,
-                                       GET_OBJ_STRING_DATA(GET_VAL_STRING(rb)),
-                                       rc->data.b != 0.0 ? "true" : "false");
-            DISPATCH();
-        }
-
         vm_error(vm, "can't add %s and %s",
                  fh_type_to_str(vm->prog, rb->type),
                  fh_type_to_str(vm->prog, rc->type));
@@ -1142,9 +1278,61 @@ op_SUB: {
         DISPATCH();
     }
 
+op_SUBI: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        // Fast path: both are integers as expected
+        if (fh_is_integer(rb) && fh_is_integer(rc)) {
+            ra->type = FH_VAL_INTEGER;
+            ra->data.i = rb->data.i - rc->data.i;
+            DISPATCH();
+        }
+        // Fallback: type hint was wrong, use generic SUB logic
+        goto op_SUB;
+    }
+
+op_SUBF: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        // Fast path: both are floats as expected
+        if (fh_is_float(rb) && fh_is_float(rc)) {
+            ra->type = FH_VAL_FLOAT;
+            ra->data.num = rb->data.num - rc->data.num;
+            DISPATCH();
+        }
+        // Fallback: type hint was wrong, use generic SUB logic
+        goto op_SUB;
+    }
+
 op_MUL: {
         do_simple_arithmetic(*, ra, rb_i, rc_i);
         DISPATCH();
+    }
+
+op_MULI: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        // Fast path: both are integers as expected
+        if (fh_is_integer(rb) && fh_is_integer(rc)) {
+            ra->type = FH_VAL_INTEGER;
+            ra->data.i = rb->data.i * rc->data.i;
+            DISPATCH();
+        }
+        // Fallback: type hint was wrong, use generic MUL logic
+        goto op_MUL;
+    }
+
+op_MULF: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        // Fast path: both are floats as expected
+        if (fh_is_float(rb) && fh_is_float(rc)) {
+            ra->type = FH_VAL_FLOAT;
+            ra->data.num = rb->data.num * rc->data.num;
+            DISPATCH();
+        }
+        // Fallback: type hint was wrong, use generic MUL logic
+        goto op_MUL;
     }
 
 op_DIV: {
@@ -1156,16 +1344,53 @@ op_DIV: {
             goto user_err;
         }
 
-        if (fh_to_double(rc) == 0.0) {
+        double rc_value = fh_to_double(rc);
+        if (rc_value == 0.0) {
             vm_error(vm, "division by zero");
             goto user_err;
         }
 
         ra->type = FH_VAL_FLOAT;
         const double a = fh_to_double(rb);
-        const double b = fh_to_double(rc);
+        const double b = rc_value;
         ra->data.num = a / b;
         DISPATCH();
+    }
+
+op_DIVI: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+
+        // Fast path: both are integers
+        if (fh_is_integer(rb) && fh_is_integer(rc)) {
+            if (rc->data.i == 0) {
+                vm_error(vm, "division by zero");
+                goto user_err;
+            }
+            ra->type = FH_VAL_INTEGER;
+            ra->data.i = rb->data.i / rc->data.i;
+            DISPATCH();
+        }
+        // Type mismatch, fallback to generic division
+        goto op_DIV;
+    }
+
+op_DIVF: {
+        struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+
+        // Fast path: both are floats
+        if (fh_is_float(rb) && fh_is_float(rc)) {
+            if (rc->data.num == 0.0) {
+                vm_error(vm, "division by zero");
+                goto user_err;
+            }
+            ra->type = FH_VAL_FLOAT;
+            ra->data.num = rb->data.num / rc->data.num;
+            DISPATCH();
+        }
+        // Type mismatch, fallback to generic division
+        goto op_DIV;
     }
 
 op_MOD: {
@@ -1175,13 +1400,14 @@ op_MOD: {
             vm_error(vm, "'mod' expects integers");
             goto user_err;
         }
-        if (rc->data.i == 0) {
+        int64_t rc_value = rc->data.i;
+        if (rc_value == 0) {
             vm_error(vm, "division by zero");
             goto user_err;
         }
 
         ra->type = FH_VAL_INTEGER;
-        ra->data.i = rb->data.i % rc->data.i;
+        ra->data.i = rb->data.i % rc_value;
         DISPATCH();
     }
 
@@ -1244,7 +1470,54 @@ op_JMP: {
             if (!vm->open_upvals) break;
             close_upval(vm);
         }
+
+        // Hot loop detection: backward jumps (rs < 0) are loops
+        if (rs < 0) {
+            uint32_t *loop_start = pc + rs;
+
+            // Find or create hot loop entry
+            int loop_idx = -1;
+            for (int i = 0; i < vm->num_hot_loops; i++) {
+                if (vm->hot_loops[i].loop_start_pc == loop_start) {
+                    loop_idx = i;
+                    break;
+                }
+            }
+
+            if (loop_idx == -1 && vm->num_hot_loops < MAX_HOT_LOOPS) {
+                // New loop - register it
+                loop_idx = vm->num_hot_loops++;
+                vm->hot_loops[loop_idx].loop_start_pc = loop_start;
+                vm->hot_loops[loop_idx].exec_count = 0;
+                vm->hot_loops[loop_idx].is_hot = false;
+            }
+
+            if (loop_idx >= 0) {
+                vm->hot_loops[loop_idx].exec_count++;
+
+                // Mark as hot if threshold exceeded
+                if (!vm->hot_loops[loop_idx].is_hot &&
+                    vm->hot_loops[loop_idx].exec_count >= HOT_LOOP_THRESHOLD) {
+                    vm->hot_loops[loop_idx].is_hot = true;
+                }
+            }
+        }
+
         pc += rs;
+
+        // After jump, check if we're now at a hot loop start
+        if (rs < 0) {
+            // We just jumped backward - check if destination is hot
+            for (int i = 0; i < vm->num_hot_loops; i++) {
+                if (vm->hot_loops[i].loop_start_pc == pc && vm->hot_loops[i].is_hot) {
+                    vm->in_hot_loop = true;
+                    goto dispatch_from_jmp;
+                }
+            }
+        }
+        vm->in_hot_loop = false;
+
+    dispatch_from_jmp:
         DISPATCH();
     }
 
@@ -1287,8 +1560,6 @@ op_CMP_EQF: {
     }
 
 op_CMP_GT: {
-        // printf("CMP_GT ra=%u rb=%u rc=%u (rb_const=%d rc_const=%d)\n", ra_i, rb_i, rc_i, RK_IS_CONST(rb_i),
-        // RK_IS_CONST(rc_i));
         cmp_test = 0;
         do_test_arithmetic(>, &cmp_test, rb_i, rc_i);
         cmp_test ^= (int) ra_i;

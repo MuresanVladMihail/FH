@@ -218,10 +218,28 @@ void fh_dump_bc_instr(struct fh_program *prog, int32_t addr, uint32_t instr) {
         case OPC_SUB: printf("sub       ");
             dump_instr_ra_rkb_rkc(instr);
             return;
+        case OPC_SUBI: printf("subi      ");
+            dump_instr_ra_rkb_rkc(instr);
+            return;
+        case OPC_SUBF: printf("subf      ");
+            dump_instr_ra_rkb_rkc(instr);
+            return;
         case OPC_MUL: printf("mul       ");
             dump_instr_ra_rkb_rkc(instr);
             return;
+        case OPC_MULI: printf("muli      ");
+            dump_instr_ra_rkb_rkc(instr);
+            return;
+        case OPC_MULF: printf("mulf      ");
+            dump_instr_ra_rkb_rkc(instr);
+            return;
         case OPC_DIV: printf("div       ");
+            dump_instr_ra_rkb_rkc(instr);
+            return;
+        case OPC_DIVI: printf("divi      ");
+            dump_instr_ra_rkb_rkc(instr);
+            return;
+        case OPC_DIVF: printf("divf      ");
             dump_instr_ra_rkb_rkc(instr);
             return;
         case OPC_MOD: printf("mod       ");
@@ -258,6 +276,12 @@ void fh_dump_bc_instr(struct fh_program *prog, int32_t addr, uint32_t instr) {
 
 
         case OPC_GETEL: printf("getel     ");
+            dump_instr_ra_rkb_rkc(instr);
+            return;
+        case OPC_GETEL_ARRAY: printf("getel_arr ");
+            dump_instr_ra_rkb_rkc(instr);
+            return;
+        case OPC_GETEL_MAP: printf("getel_map ");
             dump_instr_ra_rkb_rkc(instr);
             return;
         case OPC_SETEL: printf("setel     ");

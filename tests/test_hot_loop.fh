@@ -1,0 +1,21 @@
+# Test hot loop optimization with array access
+
+fn main() {
+    let arr = [];
+    for (let i = 0; i < 1000; i++) {
+        append(arr, i);
+    }
+
+    let start = os_time();
+    let sum = 0;
+
+    # This loop should become hot after 100 iterations
+    for (let i = 0; i < 10000; i++) {
+        sum = sum + arr[i % 1000];
+    }
+
+    let end = os_time();
+    let diff = os_difftime(start, end);
+
+    printf("Sum: %d in %d ms\n", sum, diff);
+}

@@ -29,8 +29,8 @@ $ ./fh tests/mandelbrot.fh
 
 ## Implementation Notes
 
-- register-based virtual machine (fast dispatch)
-- bytecode compiler
+- register-based virtual machine (fast dispatch with computed goto)
+- bytecode compiler with type hints
 - compact (~10k lines of C)
 - no external runtime dependencies
 

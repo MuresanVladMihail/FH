@@ -1,0 +1,30 @@
+# Test constant folding optimization
+fn main() {
+    # These should be folded at compile time
+    let a = 2 + 3;           # 5
+    let b = 10 - 4;          # 6
+    let c = 4 * 5;           # 20
+    let d = 20 / 4;          # 5
+
+    # Float constants
+    let e = 2.5 + 1.5;       # 4.0
+    let f = 10.0 * 2.0;      # 20.0
+
+    # Comparisons (stored as booleans, convert to int for printing)
+    let g = 5 > 3;           # true
+    let h = 10 < 5;          # false
+    let i = 4 == 4;          # true
+    let j = 3 != 3;          # false
+
+    printf("a=%d b=%d c=%d d=%d\n", a, b, c, d);
+    printf("e=%f f=%f\n", e, f);
+    if (g) printf("g=true "); else printf("g=false ");
+    if (h) printf("h=true "); else printf("h=false ");
+    if (i) printf("i=true "); else printf("i=false ");
+    if (j) printf("j=true\n"); else printf("j=false\n");
+
+    # Complex expression (should NOT be folded - has variables)
+    let x = 5;
+    let y = x + 3;
+    printf("y=%d (should be 8)\n", y);
+}

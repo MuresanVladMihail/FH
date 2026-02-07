@@ -1,0 +1,14 @@
+fn compute_step_and_next_x(x1, x2, size_x) {
+    let step_x = (x2 - x1) / (size_x - 1);
+    let x = x1 + step_x;
+    return [step_x, x];
+}
+
+fn main() {
+    let r = compute_step_and_next_x(-2, 2, 101);
+
+    # (2 - (-2)) / 100 = 4/100 = 0.04
+    assert(r[0] == 0.04);
+    assert(r[1] == -1.96);  # -2 + 0.04
+    print("ok\n");
+}

@@ -918,8 +918,132 @@ static int compile_store_reg_to_lvalue(struct fh_compiler *c, struct fh_p_expr *
 }
 
 
+// Helper: Check if expression is a compile-time constant
+static bool is_const_expr(struct fh_p_expr *expr) {
+    return (expr->type == EXPR_INTEGER || expr->type == EXPR_FLOAT ||
+            expr->type == EXPR_BOOL || expr->type == EXPR_NULL);
+}
+
+// Helper: Fold constant binary operations at compile time
+static int try_fold_const_bin_op(struct fh_compiler *c, struct fh_src_loc loc,
+                                  struct fh_p_expr_bin_op *expr, int dest_reg) {
+    // Only fold if both operands are compile-time constants
+    if (!is_const_expr(expr->left) || !is_const_expr(expr->right))
+        return -1;
+
+    // Only fold arithmetic and comparison operations
+    const uint32_t op = expr->op;
+    if (op != '+' && op != '-' && op != '*' && op != '/' && op != '%' &&
+        op != AST_OP_LT && op != AST_OP_GT && op != AST_OP_LE && op != AST_OP_GE &&
+        op != AST_OP_EQ && op != AST_OP_NEQ)
+        return -1;
+
+    // Get constant values
+    int64_t left_int = 0, right_int = 0;
+    double left_float = 0.0, right_float = 0.0;
+    bool left_is_int = false, right_is_int = false;
+
+    if (expr->left->type == EXPR_INTEGER) {
+        left_int = expr->left->data.i;
+        left_is_int = true;
+    } else if (expr->left->type == EXPR_FLOAT) {
+        left_float = expr->left->data.num;
+    } else {
+        return -1;  // Can't fold non-numeric constants
+    }
+
+    if (expr->right->type == EXPR_INTEGER) {
+        right_int = expr->right->data.i;
+        right_is_int = true;
+    } else if (expr->right->type == EXPR_FLOAT) {
+        right_float = expr->right->data.num;
+    } else {
+        return -1;
+    }
+
+    // Perform constant folding based on operation
+    int result_k = -1;
+
+    if (left_is_int && right_is_int) {
+        // Integer operation
+        int64_t result;
+        switch (op) {
+            case '+': result = left_int + right_int; break;
+            case '-': result = left_int - right_int; break;
+            case '*': result = left_int * right_int; break;
+            case '/':
+                if (right_int == 0) return -1;  // Don't fold division by zero
+                result = left_int / right_int;
+                break;
+            case '%':
+                if (right_int == 0) return -1;  // Don't fold modulo by zero
+                result = left_int % right_int;
+                break;
+            case AST_OP_LT: result = (left_int < right_int); break;
+            case AST_OP_GT: result = (left_int > right_int); break;
+            case AST_OP_LE: result = (left_int <= right_int); break;
+            case AST_OP_GE: result = (left_int >= right_int); break;
+            case AST_OP_EQ: result = (left_int == right_int); break;
+            case AST_OP_NEQ: result = (left_int != right_int); break;
+            default: return -1;
+        }
+
+        // For comparisons, emit boolean constant
+        if (op == AST_OP_LT || op == AST_OP_GT || op == AST_OP_LE || op == AST_OP_GE ||
+            op == AST_OP_EQ || op == AST_OP_NEQ) {
+            result_k = add_const_bool(c, loc, result != 0);
+        } else {
+            result_k = add_const_integer(c, loc, result);
+        }
+    } else {
+        // Float operation (or mixed int/float)
+        double left_val = left_is_int ? (double)left_int : left_float;
+        double right_val = right_is_int ? (double)right_int : right_float;
+        double result;
+
+        switch (op) {
+            case '+': result = left_val + right_val; break;
+            case '-': result = left_val - right_val; break;
+            case '*': result = left_val * right_val; break;
+            case '/':
+                if (right_val == 0.0) return -1;
+                result = left_val / right_val;
+                break;
+            case AST_OP_LT: result = (left_val < right_val); break;
+            case AST_OP_GT: result = (left_val > right_val); break;
+            case AST_OP_LE: result = (left_val <= right_val); break;
+            case AST_OP_GE: result = (left_val >= right_val); break;
+            case AST_OP_EQ: result = (left_val == right_val); break;
+            case AST_OP_NEQ: result = (left_val != right_val); break;
+            default: return -1;
+        }
+
+        // For comparisons, emit boolean constant
+        if (op == AST_OP_LT || op == AST_OP_GT || op == AST_OP_LE || op == AST_OP_GE ||
+            op == AST_OP_EQ || op == AST_OP_NEQ) {
+            result_k = add_const_bool(c, loc, result != 0.0);
+        } else {
+            result_k = add_const_number(c, loc, result);
+        }
+    }
+
+    if (result_k < 0)
+        return -1;
+
+    // Emit LDC instruction to load the constant
+    result_k = RK_FROM_CONST(result_k);
+    if (add_instr(c, loc, MAKE_INSTR_AB(OPC_LDC, dest_reg, RK_CONST_INDEX(result_k))) < 0)
+        return -1;
+
+    return dest_reg;
+}
+
 static int compile_bin_op_to_reg(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_expr_bin_op *expr,
                                  int dest_reg) {
+    // Try constant folding first
+    if (try_fold_const_bin_op(c, loc, expr, dest_reg) >= 0)
+        return dest_reg;
+
     if (expr->op == '=') {
         const int reg = compile_bin_op(c, loc, expr);
         if (reg < 0 || add_instr(c, loc, MAKE_INSTR_AB(OPC_MOV, dest_reg, reg)) < 0)
@@ -1000,9 +1124,17 @@ static int compile_bin_op_to_reg(struct fh_compiler *c, struct fh_src_loc loc, s
             break;
 
         case '/':
-            opc = OPC_DIV;
-            // your VM returns float for DIV, so hint must be float even for int/int
-            set_reg_hint(fi, dest_reg, H_FLOAT);
+            if (hl == H_INT && hr == H_INT) {
+                opc = OPC_DIVI;
+                set_reg_hint(fi, dest_reg, H_INT);
+            } else if (hl == H_FLOAT && hr == H_FLOAT) {
+                opc = OPC_DIVF;
+                set_reg_hint(fi, dest_reg, H_FLOAT);
+            } else {
+                opc = OPC_DIV;
+                // Generic division returns float
+                set_reg_hint(fi, dest_reg, H_FLOAT);
+            }
             break;
 
         case '%':
@@ -2174,6 +2306,57 @@ static int compile_block(struct fh_compiler *c, struct fh_src_loc loc,
     return 0;
 }
 
+// Peephole optimization: remove redundant MOV instructions
+static void peephole_optimize(struct code_stack *code) {
+    const int size = code_stack_size(code);
+    if (size < 2) return;
+
+    uint32_t *instrs = code_stack_data(code);
+    int write_idx = 0;
+
+    for (int i = 0; i < size; i++) {
+        uint32_t instr = instrs[i];
+        enum fh_bc_opcode opc = GET_INSTR_OP(instr);
+        bool skip = false;
+
+        // Pattern 1: MOV Ra, Ra (move to self) → remove
+        if (opc == OPC_MOV) {
+            int ra = GET_INSTR_RA(instr);
+            int rb = GET_INSTR_RB(instr);
+            if (ra == rb) {
+                skip = true;  // Redundant, skip this instruction
+            }
+        }
+
+        // Pattern 2: MOV Ra, Rb followed by MOV Rb, Ra → keep only first
+        if (!skip && i + 1 < size && opc == OPC_MOV) {
+            uint32_t next_instr = instrs[i + 1];
+            enum fh_bc_opcode next_opc = GET_INSTR_OP(next_instr);
+
+            if (next_opc == OPC_MOV) {
+                int ra = GET_INSTR_RA(instr);
+                int rb = GET_INSTR_RB(instr);
+                int next_ra = GET_INSTR_RA(next_instr);
+                int next_rb = GET_INSTR_RB(next_instr);
+
+                // MOV Ra, Rb; MOV Rb, Ra → just keep first
+                if (ra == next_rb && rb == next_ra) {
+                    instrs[write_idx++] = instr;
+                    i++;  // Skip next instruction
+                    continue;
+                }
+            }
+        }
+
+        if (!skip) {
+            instrs[write_idx++] = instr;
+        }
+    }
+
+    // Update code stack size
+    code_stack_set_size(code, write_idx);
+}
+
 static int compile_func(struct fh_compiler *c, struct fh_src_loc loc,
                         struct fh_p_expr_func *func, struct fh_func_def *func_def,
                         struct func_info *parent) {
@@ -2208,6 +2391,9 @@ static int compile_func(struct fh_compiler *c, struct fh_src_loc loc,
     }
 
     func_def->n_regs = fi->num_regs;
+
+    // Peephole optimization: remove redundant instructions
+    peephole_optimize(&fi->code);
 
     func_def->code_size = code_stack_size(&fi->code);
     func_def->code = code_stack_data(&fi->code);

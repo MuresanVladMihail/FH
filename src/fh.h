@@ -187,7 +187,7 @@ return fh_set_error((prog), "%s: expected %d argument(s), got %d", (fname), (n_e
 #define fh_is_bool(v)                   ((v)->type == FH_VAL_BOOL)
 #define fh_is_float(v)                  ((v)->type == FH_VAL_FLOAT)
 #define fh_is_integer(v)                ((v)->type == FH_VAL_INTEGER)
-#define fh_is_number(v)                 (((v)->type == FH_VAL_FLOAT || (v)->type == FH_VAL_INTEGER))
+#define fh_is_number(v)                 ((unsigned)((v)->type - FH_VAL_FLOAT) <= 1u)
 #define fh_is_c_obj(v)                  ((v)->type == FH_VAL_C_OBJ)
 #define fh_is_c_func(v)                 ((v)->type == FH_VAL_C_FUNC)
 #define fh_is_string(v)                 ((v)->type == FH_VAL_STRING)
