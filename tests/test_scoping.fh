@@ -1,0 +1,57 @@
+# Test variable scoping and shadowing
+fn main() {
+    # Global scope
+    let x = 10;
+    assert(x == 10);
+
+    # Block scope
+    {
+        let x = 20;  # Shadows outer x
+        assert(x == 20);
+
+        # Nested block
+        {
+            let x = 30;  # Shadows both
+            assert(x == 30);
+        }
+
+        assert(x == 20);  # Back to middle scope
+    }
+
+    assert(x == 10);  # Back to global scope
+
+    # Test scope in loops
+    let sum = 0;
+    for (let i = 0; i < 5; i++) {
+        let temp = i * 2;
+        sum = sum + temp;
+    }
+    assert(sum == 20);  # 0 + 2 + 4 + 6 + 8
+
+    # Test scope in if statements
+    let result = 0;
+    if (true) {
+        let inner = 42;
+        result = inner;
+    }
+    assert(result == 42);
+
+    # Test closure scope (closures can access outer variables)
+    let outer = 100;
+    let test_func = fn() {
+        let inner = 200;
+        return outer + inner;  # Can access outer
+    };
+    assert(test_func() == 300);
+
+    # Test that modifications in closures affect outer scope
+    let counter = 0;
+    let increment = fn() {
+        counter = counter + 1;
+    };
+    increment();
+    increment();
+    assert(counter == 2);
+
+    print("ok\n");
+}

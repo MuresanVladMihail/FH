@@ -1,0 +1,42 @@
+# Test operator precedence
+fn main() {
+    # Multiplication before addition
+    assert(2 + 3 * 4 == 14);
+    assert(3 * 4 + 2 == 14);
+
+    # Division before subtraction
+    assert(10 - 6 / 2 == 7);
+
+    # Parentheses override precedence
+    assert((2 + 3) * 4 == 20);
+    assert(2 * (3 + 4) == 14);
+
+    # Multiple operations
+    assert(2 + 3 * 4 - 1 == 13);
+    assert((2 + 3) * (4 - 1) == 15);
+
+    # Modulo precedence (same as multiplication/division)
+    assert(10 + 5 % 3 == 12);  # 5 % 3 = 2, then 10 + 2 = 12
+    assert((10 + 5) % 3 == 0);  # 15 % 3 = 0
+
+    # Comparison operators
+    assert(2 + 3 > 4);
+    assert(2 * 3 < 10);
+    assert(5 + 5 == 10);
+
+    # Logical operators
+    assert(true || false);
+    assert(true && true);
+    assert(!(false));
+
+    # Combined logical and comparison
+    assert(5 > 3 && 2 < 4);
+    assert(5 > 10 || 2 < 4);
+
+    # Unary minus
+    let x = 5;
+    assert(-x == -5);
+    assert(-x + 10 == 5);
+
+    print("ok\n");
+}

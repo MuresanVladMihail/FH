@@ -1,0 +1,54 @@
+# Test map (dictionary) operations
+fn main() {
+    # Create empty map
+    let m = {};
+    assert(len(m) == 0);
+
+    # Add entries
+    m["key1"] = 10;
+    m["key2"] = 20;
+    assert(len(m) == 2);
+    assert(m["key1"] == 10);
+    assert(m["key2"] == 20);
+
+    # Update existing entry
+    m["key1"] = 15;
+    assert(m["key1"] == 15);
+
+    # Test different value types
+    let mixed = {};
+    mixed["int"] = 42;
+    mixed["float"] = 3.14;
+    mixed["string"] = "hello";
+    mixed["bool"] = true;
+    mixed["null"] = null;
+
+    assert(mixed["int"] == 42);
+    assert(mixed["float"] > 3.1 && mixed["float"] < 3.2);
+    assert(mixed["string"] == "hello");
+    assert(mixed["bool"] == true);
+    assert(mixed["null"] == null);
+
+    # Test nested maps
+    let nested = {
+        "outer": {
+            "inner": 100
+        }
+    };
+    assert(nested["outer"]["inner"] == 100);
+
+    # Test map with numeric keys (converted to strings)
+    let num_keys = {};
+    num_keys["1"] = "one";
+    num_keys["2"] = "two";
+    assert(num_keys["1"] == "one");
+    assert(num_keys["2"] == "two");
+
+    # Test overwriting values
+    let m2 = {"a": 1};
+    assert(m2["a"] == 1);
+    m2["a"] = 2;
+    assert(m2["a"] == 2);
+
+    print("ok\n");
+}
