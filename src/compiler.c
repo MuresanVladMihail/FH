@@ -1,4 +1,4 @@
-﻿/* compiler.c */
+/* compiler.c */
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
@@ -9,6 +9,34 @@
 #include "ast.h"
 #include "bytecode.h"
 #include "program.h"
+
+// Helper function to compute Levenshtein distance
+static int levenshtein_distance(const char *s1, const char *s2) {
+    int len1 = strlen(s1);
+    int len2 = strlen(s2);
+
+    // Use a simple array for small strings
+    if (len1 > 100 || len2 > 100) return 999;  // Too long, skip
+
+    int matrix[101][101];
+
+    for (int i = 0; i <= len1; i++) matrix[i][0] = i;
+    for (int j = 0; j <= len2; j++) matrix[0][j] = j;
+
+    for (int i = 1; i <= len1; i++) {
+        for (int j = 1; j <= len2; j++) {
+            int cost = (s1[i - 1] == s2[j - 1]) ? 0 : 1;
+            int del = matrix[i - 1][j] + 1;
+            int ins = matrix[i][j - 1] + 1;
+            int sub = matrix[i - 1][j - 1] + cost;
+
+            matrix[i][j] = del < ins ? del : ins;
+            if (sub < matrix[i][j]) matrix[i][j] = sub;
+        }
+    }
+
+    return matrix[len1][len2];
+}
 
 #define TMP_VARIABLE     ((fh_symbol_id)-1)
 // With 9-bit RK (0..511) and reserved rk==MAX_FUNC_REGS (256),
@@ -708,7 +736,36 @@ static int compile_var(struct fh_compiler *c, struct fh_src_loc loc, fh_symbol_i
     if (k >= 0)
         return RK_FROM_CONST(k);
 
-    return fh_compiler_error(c, loc, "unknown variable or function '%s'", get_ast_symbol_name(c, var));
+    // Variable not found - try to suggest similar names
+    const char *var_name = get_ast_symbol_name(c, var);
+    const char *suggestion = NULL;
+    int min_distance = 3;  // Only suggest if distance <= 2
+
+    // Search through local variables
+    struct func_info *fi = get_cur_func_info(c, loc);
+    if (fi) {
+        for (int i = 0; i < reg_stack_size(&fi->regs); i++) {
+            const struct reg_info *ri = reg_stack_item(&fi->regs, i);
+            if (ri->var != TMP_VARIABLE) {
+                const char *candidate = get_ast_symbol_name(c, ri->var);
+                if (candidate) {
+                    int dist = levenshtein_distance(var_name, candidate);
+                    if (dist < min_distance) {
+                        min_distance = dist;
+                        suggestion = candidate;
+                    }
+                }
+            }
+        }
+    }
+
+    // Return error with suggestion if found
+    if (suggestion) {
+        return fh_compiler_error(c, loc, "unknown variable or function '%s'. Did you mean '%s'?",
+                                var_name, suggestion);
+    }
+
+    return fh_compiler_error(c, loc, "unknown variable or function '%s'", var_name);
 }
 
 static bool is_test_bin_op(struct fh_p_expr_bin_op *expr) {

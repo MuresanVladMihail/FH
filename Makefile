@@ -34,7 +34,7 @@ OBJS += src/crypto/bcrypt.o src/crypto/mt19937.o src/crypto/mt19937-jump.o src/c
 		src/tar/microtar.o src/regex/re.o src/vec/vec.o src/map/map.o src/util.o src/input.o src/buffer.o src/stack.o src/symtab.o \
 		src/operator.o src/tokenizer.o src/parser.o src/ast.o src/dump_ast.o \
 		src/compiler.o src/dump_bytecode.o src/vm.o src/gc.o \
-		src/map.o src/value.o src/src_loc.o src/program.o src/c_funcs.o
+		src/map.o src/value.o src/src_loc.o src/program.o src/c_funcs.o src/cJSON.o
 SRCS=$(patsubst %.o,%.c,$(OBJS)) 
 
 CHECK_SCRIPT = tests/test.fh

@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
+#include <ctype.h>
 
 #include "parser.h"
 #include "ast.h"
@@ -648,11 +649,187 @@ static struct fh_p_expr *parse_expr(struct fh_parser *p, bool consume_stop, char
                 fh_parse_error_expected(p, tok.loc, "'(' or operator");
                 goto err;
             }
-            struct fh_p_expr *str = new_expr(p, tok.loc, EXPR_STRING, 0);
-            if (!str)
-                goto err;
-            str->data.str = tok.data.str;
-            push_opn(&opns, str);
+
+            // Check for string interpolation ${...}
+            const char *str_content = fh_get_ast_string(p->ast, tok.data.str);
+            const char *interp_start = strstr(str_content, "${");
+
+            if (interp_start == NULL) {
+                // No interpolation - simple string
+                struct fh_p_expr *str = new_expr(p, tok.loc, EXPR_STRING, 0);
+                if (!str)
+                    goto err;
+                str->data.str = tok.data.str;
+                push_opn(&opns, str);
+                expect_opn = false;
+                continue;
+            }
+
+            // String interpolation - parse and build concatenation tree
+            struct fh_p_expr *result = NULL;
+            const char *current = str_content;
+
+            while (current && *current) {
+                const char *dollar = strstr(current, "${");
+
+                if (dollar == NULL) {
+                    // Remaining literal string
+                    if (*current) {
+                        struct fh_p_expr *lit = new_expr(p, tok.loc, EXPR_STRING, 0);
+                        if (!lit) {
+                            fh_free_expr(result);
+                            goto err;
+                        }
+                        lit->data.str = fh_buf_add_string(&p->ast->string_pool, current, strlen(current));
+                        if (lit->data.str < 0) {
+                            free(lit);
+                            fh_free_expr(result);
+                            fh_parse_error_oom(p, tok.loc);
+                            goto err;
+                        }
+
+                        if (result == NULL) {
+                            result = lit;
+                        } else {
+                            struct fh_p_expr *concat = new_expr(p, tok.loc, EXPR_BIN_OP, 0);
+                            if (!concat) {
+                                fh_free_expr(lit);
+                                fh_free_expr(result);
+                                goto err;
+                            }
+                            concat->data.bin_op.op = '+';
+                            concat->data.bin_op.left = result;
+                            concat->data.bin_op.right = lit;
+                            result = concat;
+                        }
+                    }
+                    break;
+                }
+
+                // Add literal part before ${
+                if (dollar > current) {
+                    struct fh_p_expr *lit = new_expr(p, tok.loc, EXPR_STRING, 0);
+                    if (!lit) {
+                        fh_free_expr(result);
+                        goto err;
+                    }
+                    size_t len = dollar - current;
+                    lit->data.str = fh_buf_add_string(&p->ast->string_pool, current, len);
+                    if (lit->data.str < 0) {
+                        free(lit);
+                        fh_free_expr(result);
+                        fh_parse_error_oom(p, tok.loc);
+                        goto err;
+                    }
+
+                    if (result == NULL) {
+                        result = lit;
+                    } else {
+                        struct fh_p_expr *concat = new_expr(p, tok.loc, EXPR_BIN_OP, 0);
+                        if (!concat) {
+                            fh_free_expr(lit);
+                            fh_free_expr(result);
+                            goto err;
+                        }
+                        concat->data.bin_op.op = '+';
+                        concat->data.bin_op.left = result;
+                        concat->data.bin_op.right = lit;
+                        result = concat;
+                    }
+                }
+
+                // Find matching }
+                const char *expr_start = dollar + 2;
+                const char *expr_end = strchr(expr_start, '}');
+                if (expr_end == NULL) {
+                    fh_free_expr(result);
+                    fh_parse_error(p, tok.loc, "unterminated ${...} in string interpolation");
+                    goto err;
+                }
+
+                // Parse expression inside ${...}
+                // For now, support variable names and simple expressions
+                size_t expr_len = expr_end - expr_start;
+
+                // Trim whitespace
+                while (expr_len > 0 && isspace((unsigned char)*expr_start)) {
+                    expr_start++;
+                    expr_len--;
+                }
+                while (expr_len > 0 && isspace((unsigned char)expr_start[expr_len - 1])) {
+                    expr_len--;
+                }
+
+                if (expr_len == 0) {
+                    fh_free_expr(result);
+                    fh_parse_error(p, tok.loc, "empty expression in ${...}");
+                    goto err;
+                }
+
+                // Create expression node - for now just support variable names
+                // TODO: Support full expressions by recursively calling parser
+                char *expr_str = malloc(expr_len + 1);
+                if (!expr_str) {
+                    fh_free_expr(result);
+                    fh_parse_error_oom(p, tok.loc);
+                    goto err;
+                }
+                memcpy(expr_str, expr_start, expr_len);
+                expr_str[expr_len] = '\0';
+
+                // Add variable name to symbol table
+                fh_symbol_id sym_id = fh_add_symbol(&p->ast->symtab, expr_str);
+                free(expr_str);
+
+                if (sym_id < 0) {
+                    fh_free_expr(result);
+                    fh_parse_error_oom(p, tok.loc);
+                    goto err;
+                }
+
+                // Create variable expression
+                struct fh_p_expr *expr = new_expr(p, tok.loc, EXPR_VAR, 0);
+                if (!expr) {
+                    fh_free_expr(result);
+                    fh_parse_error_oom(p, tok.loc);
+                    goto err;
+                }
+                expr->data.var = sym_id;
+
+                // Add expression to result
+                if (result == NULL) {
+                    result = expr;
+                } else {
+                    struct fh_p_expr *concat = new_expr(p, tok.loc, EXPR_BIN_OP, 0);
+                    if (!concat) {
+                        fh_free_expr(expr);
+                        fh_free_expr(result);
+                        goto err;
+                    }
+                    concat->data.bin_op.op = '+';
+                    concat->data.bin_op.left = result;
+                    concat->data.bin_op.right = expr;
+                    result = concat;
+                }
+
+                current = expr_end + 1;
+            }
+
+            if (result == NULL) {
+                // Empty interpolation resulted in empty string
+                struct fh_p_expr *str = new_expr(p, tok.loc, EXPR_STRING, 0);
+                if (!str)
+                    goto err;
+                str->data.str = fh_buf_add_string(&p->ast->string_pool, "", 0);
+                if (str->data.str < 0) {
+                    free(str);
+                    fh_parse_error_oom(p, tok.loc);
+                    goto err;
+                }
+                result = str;
+            }
+
+            push_opn(&opns, result);
             expect_opn = false;
             continue;
         }

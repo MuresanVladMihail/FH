@@ -18,6 +18,7 @@
 #include "regex/re.h"
 #include "crypto/md5.h"
 #include "crypto/bcrypt.h"
+#include "cJSON.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -1673,6 +1674,177 @@ static int fn_string_join(struct fh_program *prog, struct fh_value *ret, struct 
     return 0;
 }
 
+// Helper function to convert cJSON to FH value
+static int cjson_to_fh_value(struct fh_program *prog, cJSON *json, struct fh_value *val) {
+    if (cJSON_IsNull(json)) {
+        *val = fh_new_null();
+        return 0;
+    }
+    if (cJSON_IsBool(json)) {
+        *val = fh_new_bool(cJSON_IsTrue(json));
+        return 0;
+    }
+    if (cJSON_IsNumber(json)) {
+        double num = cJSON_GetNumberValue(json);
+        if (num == (int64_t)num) {
+            *val = fh_new_integer((int64_t)num);
+        } else {
+            *val = fh_new_float(num);
+        }
+        return 0;
+    }
+    if (cJSON_IsString(json)) {
+        *val = fh_new_string(prog, cJSON_GetStringValue(json));
+        return 0;
+    }
+    if (cJSON_IsArray(json)) {
+        struct fh_array *arr = fh_make_array(prog, false);
+        if (!arr) return -1;
+
+        int size = cJSON_GetArraySize(json);
+        for (int i = 0; i < size; i++) {
+            cJSON *item = cJSON_GetArrayItem(json, i);
+            struct fh_value item_val;
+            if (cjson_to_fh_value(prog, item, &item_val) < 0) {
+                return -1;
+            }
+            struct fh_value *slot = fh_grow_array_object(prog, arr, 1);
+            if (!slot) return -1;
+            *slot = item_val;
+        }
+
+        val->type = FH_VAL_ARRAY;
+        val->data.obj = (union fh_object *)arr;
+        return 0;
+    }
+    if (cJSON_IsObject(json)) {
+        struct fh_map *map = fh_make_map(prog, false);
+        if (!map) return -1;
+
+        cJSON *child = json->child;
+        while (child) {
+            struct fh_value key = fh_new_string(prog, child->string);
+            struct fh_value value;
+            if (cjson_to_fh_value(prog, child, &value) < 0) {
+                return -1;
+            }
+            if (fh_add_map_object_entry(prog, map, &key, &value) < 0) {
+                return -1;
+            }
+            child = child->next;
+        }
+
+        val->type = FH_VAL_MAP;
+        val->data.obj = (union fh_object *)map;
+        return 0;
+    }
+    return -1;
+}
+
+// Helper function to convert FH value to cJSON
+static cJSON *fh_value_to_cjson(struct fh_program *prog, struct fh_value *val) {
+    switch (val->type) {
+        case FH_VAL_NULL:
+            return cJSON_CreateNull();
+        case FH_VAL_BOOL:
+            return cJSON_CreateBool(val->data.b);
+        case FH_VAL_INTEGER:
+            return cJSON_CreateNumber((double)val->data.i);
+        case FH_VAL_FLOAT:
+            return cJSON_CreateNumber(val->data.num);
+        case FH_VAL_STRING: {
+            const char *str = GET_OBJ_STRING_DATA(val->data.obj);
+            return cJSON_CreateString(str);
+        }
+        case FH_VAL_ARRAY: {
+            struct fh_array *arr = GET_VAL_ARRAY(val);
+            cJSON *json_arr = cJSON_CreateArray();
+            if (!json_arr) return NULL;
+
+            for (uint32_t i = 0; i < arr->len; i++) {
+                cJSON *item = fh_value_to_cjson(prog, &arr->items[i]);
+                if (!item) {
+                    cJSON_Delete(json_arr);
+                    return NULL;
+                }
+                cJSON_AddItemToArray(json_arr, item);
+            }
+            return json_arr;
+        }
+        case FH_VAL_MAP: {
+            struct fh_map *map = GET_VAL_MAP(val);
+            cJSON *json_obj = cJSON_CreateObject();
+            if (!json_obj) return NULL;
+
+            struct fh_value key = fh_new_null();
+            while (fh_next_map_object_key(map, &key, &key) == 0) {
+                if (key.type != FH_VAL_STRING) continue;
+
+                const char *key_str = GET_OBJ_STRING_DATA(key.data.obj);
+                struct fh_value map_val;
+                if (fh_get_map_object_value(map, &key, &map_val) < 0) continue;
+
+                cJSON *json_val = fh_value_to_cjson(prog, &map_val);
+                if (!json_val) {
+                    cJSON_Delete(json_obj);
+                    return NULL;
+                }
+                cJSON_AddItemToObject(json_obj, key_str, json_val);
+            }
+            return json_obj;
+        }
+        default:
+            return cJSON_CreateNull();
+    }
+}
+
+static int fn_json_parse(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    if (check_n_args(prog, "json_parse()", 1, n_args))
+        return -1;
+
+    if (args[0].type != FH_VAL_STRING)
+        return fh_set_error(prog, "json_parse() expects a string argument");
+
+    const char *json_str = GET_OBJ_STRING_DATA(args[0].data.obj);
+    cJSON *json = cJSON_Parse(json_str);
+
+    if (!json) {
+        const char *error_ptr = cJSON_GetErrorPtr();
+        if (error_ptr) {
+            return fh_set_error(prog, "json_parse() error: %s", error_ptr);
+        }
+        return fh_set_error(prog, "json_parse() failed to parse JSON");
+    }
+
+    int result = cjson_to_fh_value(prog, json, ret);
+    cJSON_Delete(json);
+
+    if (result < 0)
+        return fh_set_error(prog, "json_parse() failed to convert JSON to FH value");
+
+    return 0;
+}
+
+static int fn_json_stringify(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    if (check_n_args(prog, "json_stringify()", 1, n_args))
+        return -1;
+
+    cJSON *json = fh_value_to_cjson(prog, &args[0]);
+    if (!json)
+        return fh_set_error(prog, "json_stringify() failed to convert value to JSON");
+
+    char *json_str = cJSON_PrintUnformatted(json);
+    cJSON_Delete(json);
+
+    if (!json_str)
+        return fh_set_error(prog, "json_stringify() out of memory");
+
+    *ret = fh_new_string(prog, json_str);
+    cJSON_free(json_str);
+
+    return 0;
+}
+
 static int fn_string_char(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
     if (check_n_args(prog, "string_char()", 1, n_args))
         return -1;
@@ -2541,6 +2713,9 @@ const struct fh_named_c_func fh_std_c_funcs[] = {
     DEF_FN(contains_key),
     DEF_FN(reserve),
     DEF_FN(delete),
+
+    DEF_FN(json_parse),
+    DEF_FN(json_stringify),
 };
 const int fh_std_c_funcs_len = sizeof(fh_std_c_funcs) / sizeof(fh_std_c_funcs[0]);
 
