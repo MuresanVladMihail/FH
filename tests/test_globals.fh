@@ -1,0 +1,107 @@
+# Test file-scoped global variables
+
+# Simple constants
+let global_number = 42;
+let global_string = "Hello, World!";
+let global_bool = true;
+let global_null = null;
+
+# Complex types
+let global_array = [1, 2, 3, 4, 5];
+let global_map = {"name": "FH", "version": 1, "active": true};
+
+# Test reading globals
+fn test_read_globals() {
+    print("Testing global variable reads:");
+    print("  global_number = ", global_number);
+    print("  global_string = ", global_string);
+    print("  global_bool = ", global_bool);
+    print("  global_null = ", global_null);
+    print("  global_array = ", global_array);
+    print("  global_map = ", global_map);
+
+    # Verify values
+    assert(global_number == 42);
+    assert(global_string == "Hello, World!");
+    assert(global_bool == true);
+    assert(global_null == null);
+    assert(len(global_array) == 5);
+    assert(global_map["name"] == "FH");
+}
+
+# Test modifying globals
+fn test_modify_globals() {
+    print("\nTesting global variable modifications:");
+
+    # Modify simple values
+    global_number = 100;
+    global_string = "Modified!";
+    global_bool = false;
+
+    print("  Modified global_number = ", global_number);
+    print("  Modified global_string = ", global_string);
+    print("  Modified global_bool = ", global_bool);
+
+    # Verify modifications
+    assert(global_number == 100);
+    assert(global_string == "Modified!");
+    assert(global_bool == false);
+}
+
+# Test globals across multiple functions
+let counter = 0;
+
+fn increment() {
+    counter = counter + 1;
+}
+
+fn get_counter() {
+    return counter;
+}
+
+fn test_cross_function() {
+    print("\nTesting globals across functions:");
+    print("  Initial counter = ", counter);
+
+    increment();
+    increment();
+    increment();
+
+    print("  After 3 increments = ", counter);
+    print("  get_counter() = ", get_counter());
+
+    assert(counter == 3);
+    assert(get_counter() == 3);
+}
+
+# Test array and map modification
+fn test_complex_modification() {
+    print("\nTesting complex type modifications:");
+
+    # Modify array
+    global_array[0] = 99;
+    append(global_array, 6);
+
+    print("  Modified global_array = ", global_array);
+    assert(global_array[0] == 99);
+    assert(len(global_array) == 6);
+
+    # Modify map
+    global_map["new_key"] = "new_value";
+    global_map["version"] = 2;
+
+    print("  Modified global_map = ", global_map);
+    assert(global_map["new_key"] == "new_value");
+    assert(global_map["version"] == 2);
+}
+
+fn main() {
+    print("=== Global Variables Test Suite ===\n");
+
+    test_read_globals();
+    test_modify_globals();
+    test_cross_function();
+    test_complex_modification();
+
+    print("\n=== All tests passed! ===");
+}

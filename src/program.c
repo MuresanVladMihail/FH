@@ -62,6 +62,7 @@ struct fh_program *fh_new_program(void) {
         return NULL;
 
     map_init(&prog->global_funcs_map);
+    map_init(&prog->global_vars_map);
     map_init(&prog->c_funcs_map);
 
     vec_init(&prog->c_vals);
@@ -90,6 +91,7 @@ struct fh_program *fh_new_program(void) {
 
 err:
     map_deinit(&prog->global_funcs_map);
+    map_deinit(&prog->global_vars_map);
     map_deinit(&prog->c_funcs_map);
     fh_destroy_symtab(&prog->src_file_names);
     // p_closure_stack_free(&prog->global_funcs);
@@ -118,7 +120,18 @@ void fh_free_program(struct fh_program *prog) {
     fh_destroy_compiler(&prog->compiler);
     fh_destroy_parser(&prog->parser);
 
+    // Free global variable values
+    map_iter_t iter = map_iter(&prog->global_vars_map);
+    const char *key;
+    while ((key = map_next(&prog->global_vars_map, &iter))) {
+        struct fh_value **pval = map_get(&prog->global_vars_map, key);
+        if (pval && *pval) {
+            free(*pval);
+        }
+    }
+
     map_deinit(&prog->global_funcs_map);
+    map_deinit(&prog->global_vars_map);
     map_deinit(&prog->c_funcs_map);
     vec_deinit(&prog->c_vals);
     vec_deinit(&prog->pinned_objs);
@@ -340,6 +353,44 @@ struct fh_closure *fh_get_global_func_by_index(struct fh_program *prog,
 struct fh_closure *fh_get_global_func_by_name(struct fh_program *prog, const char *name) {
     struct fh_closure **slot = map_get(&prog->global_funcs_map, name);
     return (slot && *slot) ? *slot : NULL;
+}
+
+// Global variables implementation
+int fh_add_global_var(struct fh_program *prog, const char *name, struct fh_value *val) {
+    // Allocate memory for the value
+    struct fh_value *stored_val = malloc(sizeof(struct fh_value));
+    if (!stored_val) {
+        return -1;
+    }
+    *stored_val = *val;
+
+    // Check if variable already exists
+    struct fh_value **existing = map_get(&prog->global_vars_map, name);
+    if (existing) {
+        // Free old value and replace
+        free(*existing);
+        *existing = stored_val;
+    } else {
+        // Add new entry
+        map_set(&prog->global_vars_map, name, stored_val);
+    }
+    return 0;
+}
+
+struct fh_value *fh_get_global_var(struct fh_program *prog, const char *name) {
+    struct fh_value **slot = map_get(&prog->global_vars_map, name);
+    return (slot && *slot) ? *slot : NULL;
+}
+
+int fh_set_global_var(struct fh_program *prog, const char *name, struct fh_value *val) {
+    struct fh_value *stored_val = fh_get_global_var(prog, name);
+    if (!stored_val) {
+        // Variable doesn't exist, create it
+        return fh_add_global_var(prog, name, val);
+    }
+    // Update existing value
+    *stored_val = *val;
+    return 0;
 }
 
 int fh_compile_input(struct fh_program *prog, struct fh_input *in) {

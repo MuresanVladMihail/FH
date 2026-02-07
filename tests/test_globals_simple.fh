@@ -1,0 +1,6 @@
+# Simple test
+let x = 42;
+
+fn main() {
+    print(x);
+}

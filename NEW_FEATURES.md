@@ -1,6 +1,6 @@
 # New Features Implementation Summary
 
-## ✅ Completed Features (4/6)
+## ✅ Completed Features (6/6)
 
 ### 1. String Interpolation
 
@@ -110,11 +110,10 @@ ERROR: unknown variable or function 'lenght'. Did you mean 'length'?
 
 ---
 
-## 📋 Roadmap for Future Features (2/6)
+### 5. Default Function Parameters
 
-### 5. Default Function Parameters (Not Implemented)
+Allow functions to have optional parameters with default values:
 
-**Desired Syntax:**
 ```fh
 fn greet(name, greeting = "Hello") {
     printf("%s, %s!\n", greeting, name);
@@ -122,22 +121,31 @@ fn greet(name, greeting = "Hello") {
 
 greet("Alice");           # Uses default: "Hello, Alice!"
 greet("Bob", "Hi");       # Overrides: "Hi, Bob!"
+
+fn add(a, b = 10, c = 20) {
+    return a + b + c;
+}
+
+add(5, 3, 2);  # Returns 10
+add(5, 15);    # Returns 40 (5 + 15 + 20)
+add(7);        # Returns 37 (7 + 10 + 20)
 ```
 
-**Implementation Requirements:**
-- Extend AST to store default value expressions
-- Modify parser to recognize `param = default_expr` syntax
-- Update compiler to generate initialization code
-- Modify VM call mechanism to apply defaults
+**Implementation:**
+- Extended AST (`src/ast.h`) to add `default_values` field to store default expressions
+- Modified parser (`src/parser.c`) to recognize `param = default_expr` syntax
+- Updated compiler (`src/compiler.c`) to generate null-checking bytecode at function entry
+- Uses `OPC_CMP_EQ` and `OPC_JMP` to conditionally assign defaults only when parameters are null
+- VM already initializes missing parameters to null in `prepare_call` function
 
-**Estimated Effort:** 3-4 hours
-**Complexity:** Medium-High (requires changes across parser, compiler, and VM)
+**Files Modified:** `src/ast.h`, `src/parser.c`, `src/compiler.c`
 
 ---
 
-### 6. Optional Chaining (Not Implemented)
+### 6. Optional Chaining
 
-**Desired Syntax:**
+Safe property access that returns null if intermediate values are null/missing:
+
 ```fh
 let user = {
     "profile": {
@@ -148,18 +156,27 @@ let user = {
 };
 
 # Safe access - no error if intermediate values are null
-let city = user?.profile?.address?.city;  # "New York"
-let missing = user?.settings?.theme;      # null (no error)
+let city = user?.["profile"]?.["address"]?.["city"];  # "New York"
+
+let missing_user = null;
+let result = missing_user?.["profile"];  # null (no error)
+
+let partial = {"name": "Alice"};
+let no_profile = partial?.["profile"]?.["address"];  # null
 ```
 
-**Implementation Requirements:**
-- Add `?.` operator to tokenizer
-- Parse optional chaining expressions
-- Generate conditional access bytecode
-- Add null-checking opcodes to VM
+**Implementation:**
+- Added `?.` operator to tokenizer and operator table
+- Extended AST with `EXPR_OPTIONAL_INDEX` expression type
+- Modified parser to recognize `?.[...]` syntax (similar to regular `[...]` indexing)
+- Compiler generates null-checking bytecode using CMP_EQ and conditional jumps
+- Pattern: Check if container is null → if yes, return null; if no, perform indexing
 
-**Estimated Effort:** 4-5 hours
-**Complexity:** High (new operator, significant VM changes)
+**Files Modified:** `src/ast.h`, `src/operator.c`, `src/parser.c`, `src/compiler.c`, `src/ast.c`
+
+---
+
+## All Features Completed! 🎉
 
 ---
 

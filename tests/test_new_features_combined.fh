@@ -1,0 +1,48 @@
+# Combined test: Default parameters + Optional chaining
+
+# Function with default parameters
+fn get_nested_value(obj, path1 = "profile", path2 = "name") {
+    # Use optional chaining to safely access nested properties
+    return obj?.[ path1]?.[path2];
+}
+
+fn main() {
+    # Test 1: All defaults with valid object
+    let user1 = {
+        "profile": {
+            "name": "Alice",
+            "age": 30
+        }
+    };
+
+    let name1 = get_nested_value(user1);
+    printf("Name with defaults: %s\n", name1);
+    assert(name1 == "Alice", "Should use default paths");
+
+    # Test 2: Override defaults
+    let user2 = {
+        "settings": {
+            "theme": "dark"
+        }
+    };
+
+    let theme = get_nested_value(user2, "settings", "theme");
+    printf("Theme: %s\n", theme);
+    assert(theme == "dark", "Should use provided paths");
+
+    # Test 3: Null object with defaults
+    let null_user = null;
+    let result = get_nested_value(null_user);
+    printf("Null user result type: %s\n", type(result));
+    assert(type(result) == "null", "Should return null for null object");
+
+    # Test 4: Missing intermediate property with defaults
+    let partial_user = {
+        "name": "Bob"
+    };
+    let missing = get_nested_value(partial_user);  # profile is missing
+    printf("Missing profile type: %s\n", type(missing));
+    assert(type(missing) == "null", "Should return null for missing property");
+
+    print("ok\n");
+}

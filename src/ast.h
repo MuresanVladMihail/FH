@@ -22,7 +22,8 @@ enum {
     AST_OP_RSH,
     AST_OP_LSH,
     AST_OP_PRE_INC,
-    AST_OP_PRE_DEC
+    AST_OP_PRE_DEC,
+    AST_OP_OPTIONAL_INDEX  // Optional chaining operator ?.
 };
 
 /* =========================================== */
@@ -121,6 +122,7 @@ enum fh_expr_type {
     EXPR_MAP_LIT,
     EXPR_POST_INC,
     EXPR_POST_DEC,
+    EXPR_OPTIONAL_INDEX,  // Optional chaining: container?.[index]
 };
 
 struct fh_p_expr_bin_op {
@@ -142,6 +144,7 @@ struct fh_p_expr_func_call {
 struct fh_p_expr_func {
     int n_params;
     fh_symbol_id *params;
+    struct fh_p_expr **default_values;  // Array of default value expressions (NULL if no default)
     struct fh_p_stmt_block body;
     char *doc_string;
 };
@@ -197,12 +200,23 @@ struct fh_p_named_func {
 };
 
 /* =========================================== */
+/* == global variable ======================= */
+
+struct fh_p_global_var {
+    struct fh_p_global_var *next;
+    fh_symbol_id name;
+    struct fh_src_loc loc;
+    struct fh_p_expr *init_val;
+};
+
+/* =========================================== */
 
 struct fh_ast {
     struct fh_buffer string_pool;
     struct fh_symtab symtab;
     struct fh_symtab *file_names;
     vec_void_t *func_vector;
+    vec_void_t *global_vars_vector;
 };
 
 struct fh_ast *fh_new_ast(struct fh_symtab *file_names);
@@ -225,6 +239,8 @@ struct fh_p_stmt *fh_new_stmt(struct fh_ast *ast, struct fh_src_loc loc, enum fh
 
 struct fh_p_named_func *fh_new_named_func(struct fh_ast *ast, struct fh_src_loc loc);
 
+struct fh_p_global_var *fh_new_global_var(struct fh_ast *ast, struct fh_src_loc loc);
+
 int fh_expr_list_size(struct fh_p_expr *list);
 
 int fh_stmt_list_size(struct fh_p_stmt *list);
@@ -232,6 +248,10 @@ int fh_stmt_list_size(struct fh_p_stmt *list);
 void fh_free_named_func(struct fh_p_named_func *func);
 
 void fh_free_named_func_vector(vec_void_t *vector);
+
+void fh_free_global_var(struct fh_p_global_var *var);
+
+void fh_free_global_vars_vector(vec_void_t *vector);
 
 void fh_free_block(struct fh_p_stmt_block block);
 

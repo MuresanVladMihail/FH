@@ -46,6 +46,7 @@ struct fh_program {
     vec_void_t c_vals; // GC roots (values held by running C functions)
     union fh_object *objects; // all created objects
     map_t(struct fh_closure*) global_funcs_map;
+    map_t(struct fh_value*) global_vars_map;  // GC roots (global variables)
 
     map_void_t c_funcs_map;
 };

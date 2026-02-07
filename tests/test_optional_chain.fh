@@ -1,0 +1,40 @@
+# Test optional chaining operator ?.
+
+fn main() {
+    # Test 1: Normal access
+    let user = {
+        "profile": {
+            "address": {
+                "city": "New York"
+            }
+        }
+    };
+
+    let city = user?.["profile"]?.["address"]?.["city"];
+    printf("City: %s\n", city);
+    assert(city == "New York", "City should be New York");
+
+    # Test 2: Null handling
+    let missing_user = null;
+    let missing_city = missing_user?.["profile"];
+    printf("Missing city type: %s\n", type(missing_city));
+    assert(type(missing_city) == "null", "Should return null for null object");
+
+    # Test 3: Missing property
+    let partial_user = {
+        "name": "Alice"
+    };
+    let no_profile = partial_user?.["profile"]?.["address"];
+    printf("No profile type: %s\n", type(no_profile));
+    assert(type(no_profile) == "null", "Should return null for missing property");
+
+    # Test 4: Mixed null and valid access
+    let user2 = {
+        "profile": null
+    };
+    let result = user2?.["profile"]?.["city"];
+    printf("Mixed access type: %s\n", type(result));
+    assert(type(result) == "null", "Should return null when intermediate value is null");
+
+    print("ok\n");
+}

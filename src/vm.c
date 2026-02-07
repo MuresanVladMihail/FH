@@ -721,6 +721,8 @@ int fh_run_vm(struct fh_vm *vm) {
         [OPC_CLOSURE] = &&op_CLOSURE,
         [OPC_GETUPVAL] = &&op_GETUPVAL,
         [OPC_SETUPVAL] = &&op_SETUPVAL,
+        [OPC_GETGLOBAL] = &&op_GETGLOBAL,
+        [OPC_SETGLOBAL] = &&op_SETGLOBAL,
 
         [OPC_BNOT] = &&op_BNOT,
         [OPC_RSHIFT] = &&op_RSHIFT,
@@ -1082,6 +1084,40 @@ op_GETUPVAL: {
 op_SETUPVAL: {
         struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
         *frame->closure->upvals[ra_i]->val = *rb;
+        DISPATCH();
+    }
+
+op_GETGLOBAL: {
+        // rb_i = constant index containing variable name
+        struct fh_value *name_val = LOAD_CONST(rb_i);
+        if (name_val->type != FH_VAL_STRING) {
+            vm_error(vm, "INTERNAL ERROR: GETGLOBAL expects string constant");
+            goto user_err;
+        }
+        const char *var_name = GET_OBJ_STRING_DATA(name_val->data.obj);
+        struct fh_value *global_val = fh_get_global_var(vm->prog, var_name);
+        if (!global_val) {
+            vm_error(vm, "undefined global variable '%s'", var_name);
+            goto user_err;
+        }
+        *ra = *global_val;
+        DISPATCH();
+    }
+
+op_SETGLOBAL: {
+        // rb_i = constant index containing variable name (RK-encoded)
+        // rc_i = source value (RK-encoded)
+        struct fh_value *name_val = LOAD_CONST(rb_i);
+        if (name_val->type != FH_VAL_STRING) {
+            vm_error(vm, "INTERNAL ERROR: SETGLOBAL expects string constant");
+            goto user_err;
+        }
+        const char *var_name = GET_OBJ_STRING_DATA(name_val->data.obj);
+        struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
+        if (fh_set_global_var(vm->prog, var_name, rc) < 0) {
+            vm_error(vm, "failed to set global variable '%s'", var_name);
+            goto user_err;
+        }
         DISPATCH();
     }
 

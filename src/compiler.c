@@ -403,12 +403,11 @@ static int add_const_integer(struct fh_compiler *c, struct fh_src_loc loc, int64
     return k;
 }
 
-static int add_const_string(struct fh_compiler *c, struct fh_src_loc loc, fh_string_id str_id) {
+static int add_const_string_cstr(struct fh_compiler *c, struct fh_src_loc loc, const char *str) {
     struct func_info *fi = get_cur_func_info(c, loc);
     if (!fi)
         return -1;
     int k = 0;
-    const char *str = fh_get_ast_string(c->ast, str_id);
     stack_foreach(struct fh_value, *, c, &fi->consts) {
         if (c->type == FH_VAL_STRING && strcmp(fh_get_string(c), str) == 0)
             return k;
@@ -427,6 +426,11 @@ static int add_const_string(struct fh_compiler *c, struct fh_src_loc loc, fh_str
     val->type = FH_VAL_STRING;
     val->data.obj = str_obj;
     return k;
+}
+
+static int add_const_string(struct fh_compiler *c, struct fh_src_loc loc, fh_string_id str_id) {
+    const char *str = fh_get_ast_string(c->ast, str_id);
+    return add_const_string_cstr(c, loc, str);
 }
 
 static int add_const_global_func(struct fh_compiler *c, struct fh_src_loc loc, fh_symbol_id func) {
@@ -731,6 +735,23 @@ static int compile_var(struct fh_compiler *c, struct fh_src_loc loc, fh_symbol_i
         return reg;
     }
 
+    // global variable
+    const char *gvar_name = get_ast_symbol_name(c, var);
+    if (fh_get_global_var(c->prog, gvar_name)) {
+        // Add variable name as string constant
+        const int k = add_const_string_cstr(c, loc, gvar_name);
+        if (k < 0)
+            return -1;
+
+        // Allocate register and generate GETGLOBAL instruction
+        const int reg = alloc_reg(c, loc, TMP_VARIABLE);
+        if (reg < 0)
+            return -1;
+        if (add_instr(c, loc, MAKE_INSTR_AB(OPC_GETGLOBAL, reg, RK_FROM_CONST(k))) < 0)
+            return -1;
+        return reg;
+    }
+
     // global function
     const int k = add_const_global_func(c, loc, var);
     if (k >= 0)
@@ -948,6 +969,17 @@ static int compile_store_reg_to_lvalue(struct fh_compiler *c, struct fh_p_expr *
         if (add_var_upval(c, loc, lv->data.var, &upval) < 0) return -1;
         if (upval >= 0) {
             return add_instr(c, loc, MAKE_INSTR_AB(OPC_SETUPVAL, upval, src_rk));
+        }
+
+        // global variable?
+        const char *gvar_name2 = fh_get_ast_symbol(c->ast, lv->data.var);
+        if (fh_get_global_var(c->prog, gvar_name2)) {
+            // Add variable name as string constant
+            const int k = add_const_string_cstr(c, loc, gvar_name2);
+            if (k < 0) return -1;
+
+            // Generate SETGLOBAL instruction (RA unused, RB=name, RC=value)
+            return add_instr(c, loc, MAKE_INSTR_ABC(OPC_SETGLOBAL, 0, RK_FROM_CONST(k), src_rk));
         }
 
         return fh_compiler_error(c, loc, "undeclared variable: '%s'", fh_get_ast_symbol(c->ast, lv->data.var));
@@ -1267,6 +1299,26 @@ static int compile_bin_op(struct fh_compiler *c, struct fh_src_loc loc, struct f
                 return left_reg;
             }
 
+            // global variable
+            const char *gvar_name_assign = fh_get_ast_symbol(c->ast, expr->left->data.var);
+            if (fh_get_global_var(c->prog, gvar_name_assign)) {
+                // Compile the right-hand side value
+                int val_reg = compile_expr(c, expr->right);
+                if (val_reg < 0)
+                    return -1;
+
+                // Add variable name as string constant
+                const int k = add_const_string_cstr(c, loc, gvar_name_assign);
+                if (k < 0)
+                    return -1;
+
+                // Generate SETGLOBAL instruction (RA unused, RB=name, RC=value)
+                if (add_instr(c, loc, MAKE_INSTR_ABC(OPC_SETGLOBAL, 0, RK_FROM_CONST(k), val_reg)) < 0)
+                    return -1;
+
+                return val_reg;
+            }
+
             // no such variable
             return fh_compiler_error(c, expr->left->loc, "undeclared variable: '%s'",
                                      fh_get_ast_symbol(c->ast, expr->left->data.var));
@@ -1531,6 +1583,68 @@ static int compile_index(struct fh_compiler *c, struct fh_src_loc loc, struct fh
     return compile_index_to_reg(c, loc, expr, dest_reg);
 }
 
+static int compile_optional_index(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_expr_index *expr) {
+    // Generate: if (container == null) return null; else return container[index];
+
+    int dest_reg = alloc_reg(c, loc, TMP_VARIABLE);
+    if (dest_reg < 0)
+        return -1;
+
+    // Compile container expression
+    int container_rk = compile_expr(c, expr->container);
+    if (container_rk < 0)
+        return -1;
+
+    // Allocate null register and load null
+    int null_reg = alloc_reg(c, loc, TMP_VARIABLE);
+    if (null_reg < 0)
+        return -1;
+
+    if (add_instr(c, loc, MAKE_INSTR_AB(OPC_LDNULL, null_reg, 0)) < 0)
+        return -1;
+
+    // Compare container with null: if container == null, skip jmp (fall through to ldnull)
+    if (add_instr(c, loc, MAKE_INSTR_ABC(OPC_CMP_EQ, 0, container_rk, null_reg)) < 0)
+        return -1;
+
+    free_reg(c, loc, null_reg);
+
+    // Jump to do_index if container != null
+    int jmp_do_index = get_cur_pc(c, loc);
+    if (add_instr(c, loc, MAKE_INSTR_AS(OPC_JMP, 0, 0)) < 0)
+        return -1;
+
+    // Container is null: load null into dest_reg
+    if (add_instr(c, loc, MAKE_INSTR_AB(OPC_LDNULL, dest_reg, 0)) < 0)
+        return -1;
+
+    // Jump to end
+    int jmp_end = get_cur_pc(c, loc);
+    if (add_instr(c, loc, MAKE_INSTR_AS(OPC_JMP, 0, 0)) < 0)
+        return -1;
+
+    // do_index label
+    int do_index_pc = get_cur_pc(c, loc);
+    if (set_jmp_target(c, loc, jmp_do_index, do_index_pc) < 0)
+        return -1;
+
+    // Compile index expression
+    int index_rk = compile_expr(c, expr->index);
+    if (index_rk < 0)
+        return -1;
+
+    // Get element: dest_reg = container[index]
+    if (add_instr(c, loc, MAKE_INSTR_ABC(OPC_GETEL, dest_reg, container_rk, index_rk)) < 0)
+        return -1;
+
+    // end label
+    int end_pc = get_cur_pc(c, loc);
+    if (set_jmp_target(c, loc, jmp_end, end_pc) < 0)
+        return -1;
+
+    return dest_reg;
+}
+
 static int compile_array_lit(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_expr_array_lit *expr) {
     const int n_elems = fh_expr_list_size(expr->elem_list);
     int array_reg = alloc_n_regs(c, loc, n_elems + 1);
@@ -1676,6 +1790,7 @@ static int compile_expr(struct fh_compiler *c, struct fh_p_expr *expr) {
         case EXPR_ARRAY_LIT: return compile_array_lit(c, expr->loc, &expr->data.array_lit);
         case EXPR_MAP_LIT: return compile_map_lit(c, expr->loc, &expr->data.map_lit);
         case EXPR_INDEX: return compile_index(c, expr->loc, &expr->data.index);
+        case EXPR_OPTIONAL_INDEX: return compile_optional_index(c, expr->loc, &expr->data.index);
         case EXPR_FUNC: return compile_inner_func(c, expr->loc, &expr->data.func);
         case EXPR_POST_INC:
         case EXPR_POST_DEC: {
@@ -2428,6 +2543,76 @@ static int compile_func(struct fh_compiler *c, struct fh_src_loc loc,
             goto err;
     }
 
+    // Generate initialization code for default parameters
+    // For each parameter with a default, generate: if (param == null) param = default_value
+    for (int i = 0; i < func_def->n_params; i++) {
+        if (func->default_values && func->default_values[i]) {
+            // Get parameter register
+            int param_reg = get_var_reg(c, loc, func->params[i]);
+            if (param_reg < 0) goto err;
+
+            // Compile default value to a temporary register
+            int default_reg = compile_expr(c, func->default_values[i]);
+            if (default_reg < 0) goto err;
+
+            // Generate conditional assignment: if param is null, set to default
+            // Use OPC_ISNULL to check, then MOV to assign
+            // Actually, simpler: just always assign if value is null
+            // We'll use: TEST_NULL param_reg, skip_label; MOV param_reg, default_reg; skip_label:
+
+            // For simplicity, always check and assign
+            // Skip if not null: we need a conditional jump
+            // Let's use a simpler approach: unconditional default assignment at function start
+            // if argc < param_index, then assign default
+
+            // Actually, the VM already initializes missing params to NULL
+            // So we just need: if (param == null) param = default
+
+            // Compile: param = (param == null) ? default : param
+            // Or simpler: if param is null, mov default into it
+
+            // For now, let's use a simple approach: compile the default into a temp,
+            // then check param for null and assign if needed
+            // This requires conditional logic which is complex
+
+            // Simplest working approach: Just always evaluate and assign defaults
+            // Users can work around this by not passing arguments
+            // But this doesn't give true default parameter behavior
+
+            // Check if param is null by comparing with null constant
+            int null_reg = alloc_reg(c, loc, TMP_VARIABLE);
+            if (null_reg < 0) goto err;
+
+            // Load null into null_reg
+            if (add_instr(c, loc, MAKE_INSTR_AB(OPC_LDNULL, null_reg, 0)) < 0)
+                goto err;
+
+            // Compare param with null: CMP_EQ invert, rb, rc
+            // If param == null, skip next instruction (skip the jmp)
+            // If param != null, don't skip, execute the jmp to skip default assignment
+            if (add_instr(c, loc, MAKE_INSTR_ABC(OPC_CMP_EQ, 0, param_reg, null_reg)) < 0)
+                goto err;
+
+            free_reg(c, loc, null_reg);
+
+            // If param is NOT null, skip the default assignment
+            int jmp_skip_default = get_cur_pc(c, loc);
+            if (add_instr(c, loc, MAKE_INSTR_AS(OPC_JMP, 0, 0)) < 0)
+                goto err;
+
+            // Param is null, assign default value
+            if (add_instr(c, loc, MAKE_INSTR_AB(OPC_MOV, param_reg, default_reg)) < 0)
+                goto err;
+
+            if (RK_IS_REG(default_reg))
+                free_reg(c, loc, default_reg);
+
+            // Set jump target to skip default assignment
+            if (set_jmp_target(c, loc, jmp_skip_default, get_cur_pc(c, loc)) < 0)
+                goto err;
+        }
+    }
+
     if (compile_block(c, loc, &func->body, COMP_BLOCK_FUNC, -1) < 0)
         goto err;
 
@@ -2496,11 +2681,133 @@ static const char *get_func_name(struct fh_compiler *c, struct fh_p_named_func *
     return name;
 }
 
+// Evaluate a constant expression at compile time
+// Returns 0 on success, -1 on failure (if expression is not a constant)
+static int eval_const_expr(struct fh_compiler *c, struct fh_p_expr *expr, struct fh_value *result) {
+    if (!expr) {
+        result->type = FH_VAL_NULL;
+        return 0;
+    }
+
+    switch (expr->type) {
+        case EXPR_NULL:
+            result->type = FH_VAL_NULL;
+            return 0;
+        case EXPR_BOOL:
+            result->type = FH_VAL_BOOL;
+            result->data.b = expr->data.b;
+            return 0;
+        case EXPR_FLOAT:
+            result->type = FH_VAL_FLOAT;
+            result->data.num = expr->data.num;
+            return 0;
+        case EXPR_INTEGER:
+            result->type = FH_VAL_INTEGER;
+            result->data.i = expr->data.i;
+            return 0;
+        case EXPR_STRING: {
+            const char *str = fh_get_ast_string(c->ast, expr->data.str);
+            struct fh_string *str_obj = fh_make_string(c->prog, true, str);
+            if (!str_obj)
+                return -1;
+            result->type = FH_VAL_STRING;
+            result->data.obj = str_obj;
+            return 0;
+        }
+        case EXPR_ARRAY_LIT: {
+            struct fh_array *arr = fh_make_array(c->prog, true);
+            if (!arr)
+                return -1;
+
+            struct fh_p_expr *elem = expr->data.array_lit.elem_list;
+            while (elem) {
+                struct fh_value val;
+                if (eval_const_expr(c, elem, &val) < 0) {
+                    return fh_compiler_error(c, elem->loc, "array initializer must be constant expression");
+                }
+                if (fh_grow_array_object(c->prog, arr, arr->len + 1) < 0)
+                    return -1;
+                arr->items[arr->len++] = val;
+                elem = elem->next;
+            }
+
+            result->type = FH_VAL_ARRAY;
+            result->data.obj = arr;
+            return 0;
+        }
+        case EXPR_MAP_LIT: {
+            struct fh_map *map = fh_make_map(c->prog, true);
+            if (!map)
+                return -1;
+
+            // Map literal elements are stored as alternating key-value pairs in a flat list
+            struct fh_p_expr *elem = expr->data.map_lit.elem_list;
+            while (elem) {
+                struct fh_p_expr *key_expr = elem;
+                elem = elem->next;
+                if (!elem) {
+                    return fh_compiler_error(c, key_expr->loc, "map initializer has key without value");
+                }
+                struct fh_p_expr *val_expr = elem;
+                elem = elem->next;
+
+                struct fh_value key, val;
+                if (eval_const_expr(c, key_expr, &key) < 0) {
+                    return fh_compiler_error(c, key_expr->loc, "map key must be constant expression");
+                }
+                if (eval_const_expr(c, val_expr, &val) < 0) {
+                    return fh_compiler_error(c, val_expr->loc, "map value must be constant expression");
+                }
+
+                struct fh_value map_val;
+                map_val.type = FH_VAL_MAP;
+                map_val.data.obj = map;
+                if (fh_add_map_entry(c->prog, &map_val, &key, &val) < 0)
+                    return -1;
+            }
+
+            result->type = FH_VAL_MAP;
+            result->data.obj = map;
+            return 0;
+        }
+        default:
+            return fh_compiler_error(c, expr->loc, "global variable initializer must be a constant expression");
+    }
+}
+
 int fh_compile(struct fh_compiler *c, struct fh_ast *ast) {
     reset_compiler(c);
     c->ast = ast;
 
     int pin_state = fh_get_pin_state(c->prog);
+
+    // Compile global variables first
+    for (int i = 0; i < c->ast->global_vars_vector->length; i++) {
+        struct fh_p_global_var *gv = c->ast->global_vars_vector->data[i];
+
+        const char *name = fh_get_ast_symbol(c->ast, gv->name);
+        if (!name) {
+            fh_compiler_error(c, gv->loc, "INTERNAL COMPILER ERROR: can't find global variable name");
+            goto err;
+        }
+
+        // Check if already exists
+        if (fh_get_global_var(c->prog, name)) {
+            fh_compiler_error(c, gv->loc, "global variable '%s' already exists", name);
+            goto err;
+        }
+
+        // Evaluate initializer
+        struct fh_value init_val;
+        if (eval_const_expr(c, gv->init_val, &init_val) < 0)
+            goto err;
+
+        // Add to global variables
+        if (fh_add_global_var(c->prog, name, &init_val) < 0) {
+            fh_compiler_error(c, gv->loc, "out of memory");
+            goto err;
+        }
+    }
 
     for (int i = 0; i < c->ast->func_vector->length; i++) {
         struct fh_p_named_func *f = c->ast->func_vector->data[i];

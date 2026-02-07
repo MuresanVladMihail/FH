@@ -196,6 +196,12 @@ void fh_dump_bc_instr(struct fh_program *prog, int32_t addr, uint32_t instr) {
         case OPC_SETUPVAL: printf("setupval  ");
             dump_instr_up_rkb(instr);
             return;
+        case OPC_GETGLOBAL: printf("getglobal ");
+            dump_instr_ra_rkb(instr);
+            return;
+        case OPC_SETGLOBAL: printf("setglobal ");
+            dump_instr_ra_rkb_rkc(instr);
+            return;
 
         case OPC_ADD:
             printf("add       ");

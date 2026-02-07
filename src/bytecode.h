@@ -15,6 +15,8 @@ enum fh_bc_opcode {
     OPC_CLOSURE,
     OPC_GETUPVAL,
     OPC_SETUPVAL,
+    OPC_GETGLOBAL,
+    OPC_SETGLOBAL,
 
     OPC_MOV,
     OPC_LDNULL,
