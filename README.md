@@ -34,6 +34,26 @@ $ ./fh tests/mandelbrot.fh
 - compact (~10k lines of C)
 - no external runtime dependencies
 
+## Error Reporting
+
+FH provides detailed error messages with full stacktraces:
+
+- **Error location**: File, line, and column number where the error occurred
+- **Call stack**: Complete traceback showing the call chain from entry point to error
+- **Function names**: Each frame shows which function was executing
+- **Call sites**: Line numbers show where each function was called from
+
+Example error output:
+```
+ERROR: file.fh:5:14: error: division by zero
+
+Traceback (most recent call last):
+  File "file.fh", line 33, in main
+  File "file.fh", line 20, in process_data
+  File "file.fh", line 16, in calculate_average
+  File "file.fh", line 5, in divide
+```
+
 ## Example Code
 
 ### Closures

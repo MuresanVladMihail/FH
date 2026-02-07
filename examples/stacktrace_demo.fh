@@ -1,0 +1,36 @@
+# Demonstration of improved stacktrace functionality
+# This file intentionally contains an error to show the stacktrace
+
+fn divide(a, b) {
+    return a / b;
+}
+
+fn calculate_average(numbers) {
+    let sum = 0;
+    let count = len(numbers);
+
+    for (let i = 0; i < count; i++) {
+        sum = sum + numbers[i];
+    }
+
+    return divide(sum, count);
+}
+
+fn process_data(data) {
+    let result = calculate_average(data);
+    return result * 2;
+}
+
+fn main() {
+    let empty_list = [];
+
+    # This will cause a division by zero error
+    # The stacktrace will show:
+    #   - Where in main() we called process_data()
+    #   - Where in process_data() we called calculate_average()
+    #   - Where in calculate_average() we called divide()
+    #   - Where in divide() the error occurred
+    let value = process_data(empty_list);
+
+    printf("Value: %f\n", value);
+}

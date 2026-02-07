@@ -127,69 +127,90 @@ void fh_free_program(struct fh_program *prog) {
 }
 
 const char *fh_get_error(struct fh_program *prog) {
-    int frame_index = call_frame_stack_size(&prog->vm.call_stack) - 1;
-    if (frame_index >= 0) {
-        struct fh_vm_call_frame *frame;
-        printf("CALLSTACK BEGIN:\n");
-        do {
-            frame = call_frame_stack_item(&prog->vm.call_stack, frame_index);
-            if (frame && frame->closure) {
-                struct fh_func_def *func_def = frame->closure->func_def;
-                int32_t addr = prog->vm.pc - func_def->code;
+    char tmp[2048];  // Larger buffer for stacktrace
+    int offset = 0;
 
-                char *closure_name = "?";
-                if (frame->closure->func_def && frame->closure->func_def->name) {
-                    closure_name = GET_OBJ_STRING_DATA(frame->closure->func_def->name);
+    // First, print the error message with location
+    if (prog->vm.last_error_addr >= 0) {
+        struct fh_src_loc *loc = &prog->vm.last_error_loc;
+        offset += snprintf(tmp + offset, sizeof(tmp) - offset,
+                          "%s:%d:%d: error: %s\n",
+                          fh_get_symbol_name(&prog->src_file_names, loc->file_id),
+                          loc->line, loc->col, prog->last_error_msg);
+    } else {
+        offset += snprintf(tmp + offset, sizeof(tmp) - offset,
+                          "error: %s\n", prog->last_error_msg);
+    }
+
+    // Then print the stacktrace
+    int frame_count = call_frame_stack_size(&prog->vm.call_stack);
+    if (frame_count > 0) {
+        offset += snprintf(tmp + offset, sizeof(tmp) - offset,
+                          "\nTraceback (most recent call last):\n");
+
+        // Print frames from bottom to top (oldest to newest)
+        for (int frame_index = 0; frame_index < frame_count; frame_index++) {
+            struct fh_vm_call_frame *frame = call_frame_stack_item(&prog->vm.call_stack, frame_index);
+            if (!frame) continue;
+
+            if (frame->closure) {
+                struct fh_func_def *func_def = frame->closure->func_def;
+                const char *func_name = "?";
+                if (func_def->name) {
+                    func_name = GET_OBJ_STRING_DATA(func_def->name);
                 }
 
-                printf(" %s - %s:%d:%d\n",
-                       fh_get_symbol_name(&prog->src_file_names, func_def->code_creation_loc.file_id),
-                       closure_name,
-                       func_def->code_creation_loc.line,
-                       func_def->code_creation_loc.col);
+                // Determine location to show:
+                // - For the topmost frame: show where the error occurred
+                // - For other frames: show where the NEXT frame was called from
+                struct fh_src_loc show_loc;
+
+                if (frame_index == frame_count - 1) {
+                    // Last frame (where error occurred) - show error location
+                    if (prog->vm.last_error_addr >= 0) {
+                        show_loc = prog->vm.last_error_loc;
+                    } else {
+                        int32_t addr = prog->vm.pc - func_def->code;
+                        show_loc = fh_get_addr_src_loc(func_def, addr);
+                    }
+                } else {
+                    // Not the last frame - show where we called the next function
+                    struct fh_vm_call_frame *next_frame = call_frame_stack_item(&prog->vm.call_stack, frame_index + 1);
+                    if (next_frame && next_frame->ret_addr && next_frame->closure) {
+                        // ret_addr points to instruction AFTER call, subtract 1 to get call instruction
+                        int32_t call_addr = (next_frame->ret_addr - 1) - func_def->code;
+                        if (call_addr >= 0) {
+                            show_loc = fh_get_addr_src_loc(func_def, call_addr);
+                        } else {
+                            show_loc = func_def->code_creation_loc;
+                        }
+                    } else {
+                        // No ret_addr or next frame info - use function definition
+                        show_loc = func_def->code_creation_loc;
+                    }
+                }
+
+                offset += snprintf(tmp + offset, sizeof(tmp) - offset,
+                                  "  File \"%s\", line %d, in %s\n",
+                                  fh_get_symbol_name(&prog->src_file_names, show_loc.file_id),
+                                  show_loc.line,
+                                  func_name);
+            } else {
+                // C function call frame
+                offset += snprintf(tmp + offset, sizeof(tmp) - offset,
+                                  "  <C function>\n");
             }
 
-            frame_index--;
-        } while (frame && frame_index >= 0);
-        printf("CALLSTACK END\n");
+            if (offset >= sizeof(tmp) - 100) break;  // Prevent overflow
+        }
     }
 
-
-    if (prog->vm.last_error_addr < 0)
-        return prog->last_error_msg;
-
-    char tmp[512];
-    struct fh_src_loc *last_func = &prog->compiler.last_func_call;
-    struct fh_src_loc *loc = &prog->vm.last_error_loc;
-
-    /*
-     *
-     * The logic:
-     * Whenever you call a function the PC will be modified in a lower value
-     * because you first have to define the function for it to be callable.
-     * Meaning the PC will become lower than the current value when the function
-     * needs to be executed.
-     *
-     * Note: last_func will always be initialized because of the need of
-     * having "function main". If that function is missing an error will be
-     * issued not called from here.
-     */
-    if (loc->line > last_func->line) {
-        snprintf(tmp, sizeof(tmp), "%s:%d:%d: %s",
-                 fh_get_symbol_name(&prog->src_file_names, loc->file_id),
-                 loc->line, loc->col, prog->last_error_msg);
-    } else {
-        snprintf(tmp, sizeof(tmp), "%s:%d:%d: %s\nlast called from: %s:%d:%d",
-                 fh_get_symbol_name(&prog->src_file_names, loc->file_id),
-                 loc->line, loc->col, prog->last_error_msg,
-                 fh_get_symbol_name(&prog->src_file_names, last_func->file_id),
-                 last_func->line, last_func->col);
-    }
-
-    size_t size = (sizeof(tmp) > sizeof(prog->last_error_msg))
-                      ? sizeof(prog->last_error_msg)
-                      : sizeof(tmp);
-    memcpy(prog->last_error_msg, tmp, size);
+    // Copy to prog->last_error_msg
+    size_t copy_size = (offset < sizeof(prog->last_error_msg) - 1)
+                      ? offset
+                      : sizeof(prog->last_error_msg) - 1;
+    memcpy(prog->last_error_msg, tmp, copy_size);
+    prog->last_error_msg[copy_size] = '\0';
     return prog->last_error_msg;
 }
 
