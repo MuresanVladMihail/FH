@@ -211,6 +211,12 @@ return fh_set_error((prog), "%s: expected %d argument(s), got %d", (fname), (n_e
 #define fh_new_integer(n)               ((struct fh_value) { .type = FH_VAL_INTEGER, .data = { .i = (n) }})
 #define fh_get_integer(v)               ((v)->data.i)
 
+/* Compatibility with the float-only era "number" API. fh_get_number reads
+ * both integer and float values, since scripts now produce integers for
+ * int literals. Prefer fh_new_float/fh_get_float in new code. */
+#define fh_new_number(n)                fh_new_float((double)(n))
+#define fh_get_number(v)                ((v)->type == FH_VAL_INTEGER ? (double)(v)->data.i : (v)->data.num)
+
 struct fh_value fh_new_c_obj(struct fh_program *prog, void *ptr, fh_c_obj_gc_callback callback, int type);
 
 #define fh_get_c_obj(v) ((struct fh_c_obj*) GET_VAL_OBJ(v))
@@ -234,7 +240,7 @@ struct fh_value *fh_grow_array(struct fh_program *prog, struct fh_value *val, ui
 
 struct fh_value fh_new_map(struct fh_program *prog);
 
-int fh_alloc_map_len(const struct fh_value *map, uint32_t len);
+int fh_alloc_map_len(struct fh_program *prog, const struct fh_value *map, uint32_t len);
 
 int fh_next_map_key(const struct fh_value *map, struct fh_value *key, struct fh_value *next_key);
 

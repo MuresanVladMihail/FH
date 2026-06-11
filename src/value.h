@@ -201,7 +201,7 @@ void fh_reset_array(struct fh_array *arr);
 
 const char *fh_get_func_def_name(struct fh_func_def *func_def);
 
-int fh_alloc_map_object_len(struct fh_map *map, uint32_t len);
+int fh_alloc_map_object_len(struct fh_program *prog, struct fh_map *map, uint32_t len);
 
 int fh_next_map_object_key(struct fh_map *map, struct fh_value *key, struct fh_value *next_key);
 

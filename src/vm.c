@@ -223,11 +223,6 @@ void fh_init_vm(struct fh_vm *vm, struct fh_program *prog) {
     vm->last_error_frame_index = -1;
     call_frame_stack_init_cap(&vm->call_stack, 8192);
     fh_init_char_cache(vm);
-
-    // Initialize hot loop tracking
-    vm->num_hot_loops = 0;
-    vm->in_hot_loop = false;
-    memset(vm->hot_loops, 0, sizeof(vm->hot_loops));
 }
 
 void fh_destroy_vm(struct fh_vm *vm) {
@@ -270,8 +265,9 @@ static int ensure_stack_size(struct fh_vm *vm, const size_t size) {
     return 0;
 }
 
-static struct fh_vm_call_frame *prepare_call(struct fh_vm *vm, struct fh_closure *closure, const int ret_reg,
-                                             const int n_args) {
+static inline __attribute__((always_inline)) struct fh_vm_call_frame *prepare_call(
+        struct fh_vm *vm, struct fh_closure *closure, const int ret_reg,
+        const int n_args) {
     const struct fh_func_def *func_def = closure->func_def;
 
     if (ensure_stack_size(vm, (size_t) ret_reg + 1u + (size_t) func_def->n_regs) < 0)
@@ -777,6 +773,7 @@ int fh_run_vm(struct fh_vm *vm) {
 
         [OPC_LEN] = &&op_LEN,
         [OPC_APPEND] = &&op_APPEND,
+        [OPC_FORLOOP] = &&op_FORLOOP,
     };
 
 #define DISPATCH() do { \
@@ -900,22 +897,6 @@ op_GETEL: {
         struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
         struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
 
-        // HOT LOOP FAST PATH: Assume array[int] pattern (most common in hot loops)
-        // This eliminates ~5 checks and branches per array access
-        if (vm->in_hot_loop) {
-            // Guard: check assumptions are valid
-            if (rb->type == FH_VAL_ARRAY && rc->type == FH_VAL_INTEGER && rc->data.i >= 0) {
-                const struct fh_array *arr = GET_OBJ_ARRAY(rb->data.obj);
-                const int64_t idx = rc->data.i;
-                if ((uint64_t)idx < (uint64_t)arr->len) {
-                    *ra = arr->items[idx];
-                    DISPATCH();
-                }
-                // Index out of bounds - fall through to generic path for null handling
-            }
-            // Guard failed - fall through to generic path
-        }
-
         switch (rb->type) {
             case FH_VAL_ARRAY: {
                 int64_t idx;
@@ -1020,7 +1001,7 @@ op_NEWMAP: {
         // Only reserve/alloc if we actually have elements in the literal
         if (n_pairs != 0) {
             // Allocate enough capacity for the pairs we’ll insert
-            if (fh_alloc_map_object_len(map, (uint32_t) n_pairs) < 0) goto err;
+            if (fh_alloc_map_object_len(vm->prog, map, (uint32_t) n_pairs) < 0) goto err;
 
             GC_PIN_OBJ(map);
             for (int i = 0; i < n_pairs; i++) {
@@ -1034,7 +1015,7 @@ op_NEWMAP: {
             }
             GC_UNPIN_OBJ(map);
         } else {
-            if (fh_alloc_map_object_len(map, 8) < 0) goto err; // cap ~16
+            if (fh_alloc_map_object_len(vm->prog, map, 4) < 0) goto err; // cap 8
         }
 
         ra->type = FH_VAL_MAP;
@@ -1507,53 +1488,43 @@ op_JMP: {
             close_upval(vm);
         }
 
-        // Hot loop detection: backward jumps (rs < 0) are loops
-        if (rs < 0) {
-            uint32_t *loop_start = pc + rs;
-
-            // Find or create hot loop entry
-            int loop_idx = -1;
-            for (int i = 0; i < vm->num_hot_loops; i++) {
-                if (vm->hot_loops[i].loop_start_pc == loop_start) {
-                    loop_idx = i;
-                    break;
-                }
-            }
-
-            if (loop_idx == -1 && vm->num_hot_loops < MAX_HOT_LOOPS) {
-                // New loop - register it
-                loop_idx = vm->num_hot_loops++;
-                vm->hot_loops[loop_idx].loop_start_pc = loop_start;
-                vm->hot_loops[loop_idx].exec_count = 0;
-                vm->hot_loops[loop_idx].is_hot = false;
-            }
-
-            if (loop_idx >= 0) {
-                vm->hot_loops[loop_idx].exec_count++;
-
-                // Mark as hot if threshold exceeded
-                if (!vm->hot_loops[loop_idx].is_hot &&
-                    vm->hot_loops[loop_idx].exec_count >= HOT_LOOP_THRESHOLD) {
-                    vm->hot_loops[loop_idx].is_hot = true;
-                }
-            }
-        }
-
         pc += rs;
+        DISPATCH();
+    }
 
-        // After jump, check if we're now at a hot loop start
-        if (rs < 0) {
-            // We just jumped backward - check if destination is hot
-            for (int i = 0; i < vm->num_hot_loops; i++) {
-                if (vm->hot_loops[i].loop_start_pc == pc && vm->hot_loops[i].is_hot) {
-                    vm->in_hot_loop = true;
-                    goto dispatch_from_jmp;
-                }
+op_FORLOOP: {
+        struct fh_value *limit = LOAD_REG_OR_CONST(rb_i);
+
+        if (ra->type == FH_VAL_INTEGER && limit->type == FH_VAL_INTEGER) {
+            if (++ra->data.i < limit->data.i) {
+                // take the back edge through the next JMP's offset
+                pc += GET_INSTR_RS(*pc) + 1;
+            } else {
+                pc++; // exit: skip the back-edge JMP
             }
+            DISPATCH();
         }
-        vm->in_hot_loop = false;
 
-    dispatch_from_jmp:
+        // generic numeric path (mirrors INC + CMP_LT semantics)
+        if (!fh_is_number(ra)) {
+            vm_error(vm, "increment on non-numeric value");
+            goto user_err;
+        }
+        if (!fh_is_number(limit)) {
+            vm_error(vm, "comparison on non-numeric values");
+            goto user_err;
+        }
+        if (fh_is_float(ra))
+            ra->data.num += 1.0;
+        else
+            ra->data.i += 1;
+        const double a = fh_is_float(ra) ? ra->data.num : (double) ra->data.i;
+        const double b = fh_is_float(limit) ? limit->data.num : (double) limit->data.i;
+        if (a < b) {
+            pc += GET_INSTR_RS(*pc) + 1;
+        } else {
+            pc++;
+        }
         DISPATCH();
     }
 

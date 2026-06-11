@@ -5,6 +5,7 @@
 #include <time.h>
 
 #include "program.h"
+#include "pool.h"
 #include "fh.h"
 
 void fh_init(void) {
@@ -68,10 +69,13 @@ struct fh_program *fh_new_program(void) {
     vec_init(&prog->c_vals);
     vec_init(&prog->pinned_objs);
     prog->gc_frequency = 0;
+    prog->gc_live_bytes = 0;
     prog->gc_collect_at = 1000000;
     prog->gc_isPaused = false;
     prog->alive_objects = 0;
     prog->objects = NULL;
+    for (int i = 0; i < FH_NUM_POOL_CLASSES; i++)
+        prog->small_pool[i] = NULL;
     prog->null_value.type = FH_VAL_NULL;
     prog->last_error_msg[0] = '\0';
     fh_init_symtab(&prog->src_file_names);
@@ -136,6 +140,7 @@ void fh_free_program(struct fh_program *prog) {
     vec_deinit(&prog->c_vals);
     vec_deinit(&prog->pinned_objs);
 
+    fh_pool_drain(prog);
     free(prog);
 }
 

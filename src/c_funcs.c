@@ -2461,7 +2461,7 @@ static int fn_reserve(struct fh_program *prog, struct fh_value *ret, struct fh_v
         if (fh_reserve_array_capacity(prog, arr, cap32) < 0)
             return -1;
     } else {
-        if (fh_alloc_map_len(&args[0], cap32) < 0)
+        if (fh_alloc_map_len(prog, &args[0], cap32) < 0)
             return -1;
     }
 

@@ -43,5 +43,5 @@ fn mandelbrot(x1,y1, x2,y2, size_x,size_y, max_iter)
 fn main()
 {
     let s = mandelbrot(-2, -2, 2, 2, 500, 500, 1500);
-    printf("%f\n", s);
+    printf("%d\n", s);
 }

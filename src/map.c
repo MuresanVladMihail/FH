@@ -6,6 +6,7 @@
 
 #include "program.h"
 #include "value.h"
+#include "pool.h"
 
 
 #define OCCUPIED(e) ((e)->key.type != FH_VAL_NULL)
@@ -101,9 +102,11 @@ static uint32_t find_slot_generic(struct fh_map_entry *entries, const uint32_t c
     return i;
 }
 
-static int rebuild(struct fh_map *map, const uint32_t cap) {
-    struct fh_map_entry *entries = calloc(cap, sizeof(*entries));
+static int rebuild(struct fh_program *prog, struct fh_map *map, const uint32_t cap) {
+    const size_t cap_size = cap * sizeof(struct fh_map_entry);
+    struct fh_map_entry *entries = fh_pool_alloc(prog, cap_size);
     if (!entries) return -1;
+    memset(entries, 0, cap_size);
 
     for (uint32_t i = 0; i < map->cap; i++) {
         const struct fh_map_entry *e = &map->entries[i];
@@ -114,7 +117,7 @@ static int rebuild(struct fh_map *map, const uint32_t cap) {
         entries[idx] = *e;
     }
 
-    free(map->entries);
+    fh_pool_free(prog, map->entries, map->cap * sizeof(struct fh_map_entry));
     map->entries = entries;
     map->cap = cap;
     return 0;
@@ -154,13 +157,13 @@ int fh_add_map_object_entry(struct fh_program *prog, struct fh_map *map,
     }
 
     if (map->cap == 0) {
-        if (rebuild(map, 16) < 0) {
+        if (rebuild(prog, map, 8) < 0) {
             fh_set_error(prog, "out of memory");
             return -1;
         }
     } else if (((map->len + 1) * 4) > (map->cap * 3)) {
         // load factor > 0.75
-        if (rebuild(map, map->cap << 1) < 0) {
+        if (rebuild(prog, map, map->cap << 1) < 0) {
             fh_set_error(prog, "out of memory");
             return -1;
         }
@@ -237,18 +240,18 @@ int fh_delete_map_object_entry(struct fh_map *map, struct fh_value *key) {
     return 0;
 }
 
-static int map_reserve_empty(struct fh_map *map, const uint32_t len_pow2_cap) {
+static int map_reserve_empty(struct fh_program *prog, struct fh_map *map, const uint32_t len_pow2_cap) {
     size_t cap_size = len_pow2_cap * sizeof(struct fh_map_entry);
-    struct fh_map_entry *entries = malloc(cap_size);
+    struct fh_map_entry *entries = fh_pool_alloc(prog, cap_size);
     if (!entries) return -1;
     memset(entries, 0, cap_size);
-    free(map->entries);
+    fh_pool_free(prog, map->entries, map->cap * sizeof(struct fh_map_entry));
     map->entries = entries;
     map->cap = len_pow2_cap;
     return 0;
 }
 
-int fh_alloc_map_object_len(struct fh_map *map, const uint32_t len) {
+int fh_alloc_map_object_len(struct fh_program *prog, struct fh_map *map, const uint32_t len) {
     if (len == 0) {
         return 0;
     }
@@ -256,19 +259,19 @@ int fh_alloc_map_object_len(struct fh_map *map, const uint32_t len) {
     if (len > UINT32_MAX / 2) return -1;
 
     uint32_t cap = next_pow2_u32(len * 2);
-    if (cap < 16) cap = 16;
+    if (cap < 8) cap = 8;
 
-    if (map->cap == 0) return map_reserve_empty(map, cap);
-    return rebuild(map, cap);
+    if (map->cap == 0) return map_reserve_empty(prog, map, cap);
+    return rebuild(prog, map, cap);
 }
 
 /* value functions */
 
-int fh_alloc_map_len(const struct fh_value *map, const uint32_t len) {
+int fh_alloc_map_len(struct fh_program *prog, const struct fh_value *map, const uint32_t len) {
     struct fh_map *m = GET_VAL_MAP(map);
     if (!m)
         return -1;
-    return fh_alloc_map_object_len(m, len);
+    return fh_alloc_map_object_len(prog, m, len);
 }
 
 int fh_delete_map_entry(const struct fh_value *map, struct fh_value *key) {

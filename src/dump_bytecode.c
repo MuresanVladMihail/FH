@@ -360,6 +360,10 @@ void fh_dump_bc_instr(struct fh_program *prog, int32_t addr, uint32_t instr) {
             dump_instr_ra_rkb_rkc(instr);
             return;
 
+        case OPC_FORLOOP: printf("forloop   ");
+            dump_instr_ra_rkb(instr);
+            return;
+
         case OPC_LDNULL: printf("ldnull    r%d\n", GET_INSTR_RA(instr));
             return;
         case OPC_LDC: printf("ldc       r%d, c[%d]\n", GET_INSTR_RA(instr), GET_INSTR_RU(instr));

@@ -73,7 +73,12 @@ enum fh_bc_opcode {
     OPC_DEC,
 
     OPC_LEN,
-    OPC_APPEND
+    OPC_APPEND,
+
+    // Fused numeric for-loop back-edge: increments RA, compares with RK(B),
+    // and while below the limit jumps via the RS offset of the following JMP
+    // instruction (which is never dispatched itself); otherwise skips it.
+    OPC_FORLOOP
 };
 
 #define GET_INSTR_OP(instr)    (((uint32_t)(instr))&0x3f)
