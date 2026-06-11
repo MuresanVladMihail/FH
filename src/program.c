@@ -450,6 +450,10 @@ int fh_compile_file(struct fh_program *prog, const char *filename, bool is_manda
     return fh_compile_input(prog, in);
 }
 
+bool fh_function_exists(struct fh_program *prog, const char *func_name) {
+    return fh_get_global_func_by_name(prog, func_name) != NULL;
+}
+
 int fh_call_function(struct fh_program *prog, const char *func_name,
                      struct fh_value *args, int n_args, struct fh_value *ret) {
     struct fh_closure *closure = fh_get_global_func_by_name(prog, func_name);

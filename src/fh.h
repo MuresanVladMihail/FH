@@ -157,6 +157,10 @@ int fh_compile_pack(struct fh_program *prog, const char *path, bool is_mandatory
 
 void fh_dump_bytecode(struct fh_program *prog);
 
+/* Returns true if a global script function with this name exists. Useful
+ * for optional callbacks, so a missing function isn't a per-call error. */
+bool fh_function_exists(struct fh_program *prog, const char *func_name);
+
 int fh_call_function(struct fh_program *prog, const char *func_name,
                      struct fh_value *args, int n_args, struct fh_value *ret);
 
