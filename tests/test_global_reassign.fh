@@ -1,0 +1,51 @@
+# Test global variable reassignment
+
+let score = 0;
+let player_name = "Player1";
+let inventory = [];
+
+fn add_points(points) {
+    score = score + points;
+}
+
+fn change_name(new_name) {
+    player_name = new_name;
+}
+
+fn add_item(item) {
+    append(inventory, item);
+}
+
+fn reset_game() {
+    score = 0;
+    player_name = "Guest";
+    inventory = [];
+}
+
+fn main() {
+    print("=== Initial State ===");
+    print("Score: ", score);
+    print("Name: ", player_name);
+    print("Inventory: ", inventory);
+
+    print("\n=== Playing Game ===");
+    add_points(100);
+    add_points(50);
+    change_name("Alice");
+    add_item("sword");
+    add_item("potion");
+
+    print("Score: ", score);
+    print("Name: ", player_name);
+    print("Inventory: ", inventory);
+
+    print("\n=== After Reset ===");
+    reset_game();
+    print("Score: ", score);
+    print("Name: ", player_name);
+    print("Inventory: ", inventory);
+
+    print("\n=== Changing Types ===");
+    score = "Game Over";  # Change from number to string!
+    print("Score: ", score);
+}

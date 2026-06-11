@@ -132,4 +132,11 @@ struct fh_closure *fh_get_global_func_by_index(struct fh_program *prog, int inde
 
 struct fh_closure *fh_get_global_func_by_name(struct fh_program *prog, const char *name);
 
+// Global variables
+int fh_add_global_var(struct fh_program *prog, const char *name, struct fh_value *val);
+
+struct fh_value *fh_get_global_var(struct fh_program *prog, const char *name);
+
+int fh_set_global_var(struct fh_program *prog, const char *name, struct fh_value *val);
+
 #endif /* FH_INTERNAL_H_FILE */

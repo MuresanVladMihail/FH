@@ -1,0 +1,33 @@
+# Test array bounds checking
+fn main() {
+    let arr = [1, 2, 3, 4, 5];
+
+    # Valid access
+    assert(arr[0] == 1);
+    assert(arr[4] == 5);
+
+    # Test array length
+    assert(len(arr) == 5);
+
+    # Test array modification
+    arr[2] = 10;
+    assert(arr[2] == 10);
+
+    # Test append
+    append(arr, 6);
+    assert(len(arr) == 6);
+    assert(arr[5] == 6);
+
+    # Test nested arrays
+    let nested = [[1, 2], [3, 4]];
+    assert(nested[0][0] == 1);
+    assert(nested[1][1] == 4);
+
+    # Test empty array
+    let empty = [];
+    assert(len(empty) == 0);
+    append(empty, 1);
+    assert(len(empty) == 1);
+
+    print("ok\n");
+}

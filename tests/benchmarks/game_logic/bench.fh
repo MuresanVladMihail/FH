@@ -1,5 +1,18 @@
-fn rand01(seed_ref) { return math_random(seed_ref); }
-fn i32(x) { return 2; }
+# game logic benchmark — 1:1 with bench.py / bench.rb (same xorshift32 PRNG,
+# same truncating i32, same active_len compaction; expected checksum
+# 561078374.583059)
+
+fn rand01(seed_ref) {
+    # xorshift32 -> [0,1), masks are 0xFFFFFFFF / 0xFFFFFF
+    let x = seed_ref[0] & 4294967295;
+    x = x ^ ((x << 13) & 4294967295);
+    x = x ^ (x >> 17);
+    x = x ^ ((x << 5) & 4294967295);
+    seed_ref[0] = x & 4294967295;
+    return (x & 16777215) / 16777216.0;
+}
+
+fn i32(x) { return tointeger(x); }
 
 fn make_tilemap(w, h, seed_ref) {
     let tiles = [];
@@ -38,30 +51,33 @@ fn spawn_entity(seed,w,h, xs,ys,vxs,vys, ws,hs, onGs,ais,lifes) {
     append(hs,  0.9);
     append(onGs,false);
     append(ais, (rand01(seed) < 0.25));
-    append(lifes, 300 + (rand01(seed)*600));
+    append(lifes, 300.0 + (rand01(seed)*600.0));
 }
 
 fn bench(frames, entities, spawnPerFrame) {
     let seed=[123456789];
-    let map=make_tilemap(128,72,seed[0]);
+    let map=make_tilemap(128,72,seed);
     let w=map["w"]; let h=map["h"]; let tiles=map["tiles"];
 
     let xs=[]; let ys=[]; let vxs=[]; let vys=[];
     let ws=[]; let hs=[]; let onGs=[]; let ais=[]; let lifes=[];
 
-    for (let i = 0; i<entities; i++) { spawn_entity(seed[0],w,h,xs,ys,vxs,vys,ws,hs,onGs,ais,lifes);  }
+    for (let i = 0; i<entities; i++) { spawn_entity(seed,w,h,xs,ys,vxs,vys,ws,hs,onGs,ais,lifes); }
 
     let dt=1.0/60.0;
     let checksum=0.0;
 
+    let active_len = len(xs);
+
     for (let f = 0; f<frames;f++) {
-        for (let s = 0; s<spawnPerFrame; s = s + 1) { spawn_entity(seed[0],w,h,xs,ys,vxs,vys,ws,hs,onGs,ais,lifes); }
+        for (let s = 0; s<spawnPerFrame; s++) { spawn_entity(seed,w,h,xs,ys,vxs,vys,ws,hs,onGs,ais,lifes); }
+
+        # only the freshly spawned entities extend the active length
+        active_len = active_len + spawnPerFrame;
 
         # in-place compaction across ALL arrays
         let write=0;
-        let n=0;
-        let L=len(xs);
-        for (let n = 0; n<L; n++) {
+        for (let n = 0; n<active_len; n++) {
             let x=xs[n]; let y=ys[n]; let vx=vxs[n]; let vy=vys[n];
             let ew=ws[n]; let eh=hs[n];
             let onG=onGs[n]; let ai=ais[n];
@@ -70,7 +86,7 @@ fn bench(frames, entities, spawnPerFrame) {
             vy = vy + 18.0*dt;
 
             if (ai) {
-                let dir=-1; 
+                let dir=-1;
                 if (vx>=0) dir=1;
                 let aheadX=i32(x+dir);
                 let footY=i32(y+1.0);
@@ -96,16 +112,13 @@ fn bench(frames, entities, spawnPerFrame) {
             }
         }
 
-        # trim tails (set to NULL so GC can drop refs if needed)
-        for (let k = write; k < L; k++) {
-            xs[k]=null; ys[k]=null; vxs[k]=null; vys[k]=null;
-            ws[k]=null; hs[k]=null; onGs[k]=null; ais[k]=null; lifes[k]=null;
-        }
+        # new active length is the compacted count
+        active_len = write;
     }
 
     printf("%f\n", checksum);
 }
 
 fn main() { ;
-       bench(3600, 300, 3); 
+       bench(3600, 300, 3);
 }

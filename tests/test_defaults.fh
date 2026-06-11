@@ -1,0 +1,30 @@
+# Test default function parameters
+fn greet(name, greeting = "Hello") {
+    printf("%s, %s!\n", greeting, name);
+}
+
+fn add(a, b = 10, c = 20) {
+    return a + b + c;
+}
+
+fn main() {
+    # Test with all arguments
+    greet("Alice", "Hi");
+
+    # Test with default greeting
+    greet("Bob");
+
+    # Test addition with all arguments
+    let sum1 = add(5, 3, 2);
+    printf("5 + 3 + 2 = %d\n", sum1);
+
+    # Test with one default
+    let sum2 = add(5, 15);
+    printf("5 + 15 + 20 = %d\n", sum2);
+
+    # Test with two defaults
+    let sum3 = add(7);
+    printf("7 + 10 + 20 = %d\n", sum3);
+
+    print("ok\n");
+}

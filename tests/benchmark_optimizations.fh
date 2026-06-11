@@ -1,0 +1,39 @@
+# Benchmark to test Phase 1 optimizations
+
+fn test_arithmetic() {
+    let sum = 0;
+    let i = 0;
+    while (i < 10000000) {
+        let a = i;
+        let b = i + 1;
+        let c = a * b;
+        let d = c - a;
+        sum = sum + d;
+        i = i + 1;
+    }
+    return sum;
+}
+
+fn test_string_concat() {
+    let s = "";
+    let i = 0;
+    while (i < 100000) {
+        s = "a" + "b";
+        i = i + 1;
+    }
+    return s;
+}
+
+fn main() {
+    let start = os_time();
+    let result1 = test_arithmetic();
+    let end1 = os_time();
+    let diff1 = os_difftime(start, end1);
+    printf("Arithmetic test: %d in %d ms\n", result1, diff1);
+
+    let start2 = os_time();
+    let result2 = test_string_concat();
+    let end2 = os_time();
+    let diff2 = os_difftime(start2, end2);
+    printf("String concat test: '%s' in %d ms\n", result2, diff2);
+}

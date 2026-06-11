@@ -6,9 +6,10 @@
 
 #include "program.h"
 #include "value.h"
+#include "pool.h"
 #include "fh.h"
 
-static void free_func_def(struct fh_func_def *func_def) {
+static void free_func_def(struct fh_program *prog, struct fh_func_def *func_def) {
     if (func_def->consts)
         free(func_def->consts);
     if (func_def->code)
@@ -17,81 +18,53 @@ static void free_func_def(struct fh_func_def *func_def) {
         free(func_def->upvals);
     if (func_def->code_src_loc)
         free(func_def->code_src_loc);
-    free(func_def);
+    fh_pool_free(prog, func_def, sizeof(struct fh_func_def));
 }
 
-static void free_closure(struct fh_closure *closure) {
-    free(closure);
+static void free_closure(struct fh_program *prog, struct fh_closure *closure) {
+    fh_pool_free(prog, closure,
+                 sizeof(struct fh_closure) + closure->n_upvals * sizeof(struct fh_upval *));
 }
 
-static void free_upval(struct fh_upval *upval) {
-    free(upval);
+static void free_upval(struct fh_program *prog, struct fh_upval *upval) {
+    fh_pool_free(prog, upval, sizeof(struct fh_upval));
 }
 
-static void free_array(struct fh_array *arr) {
+static void free_array(struct fh_program *prog, struct fh_array *arr) {
     if (arr->items)
         free(arr->items);
-    free(arr);
+    fh_pool_free(prog, arr, sizeof(struct fh_array));
 }
 
-static void free_map(struct fh_map *map) {
+static void free_map(struct fh_program *prog, struct fh_map *map) {
     if (map->entries)
-        free(map->entries);
-    free(map);
+        fh_pool_free(prog, map->entries, map->cap * sizeof(struct fh_map_entry));
+    fh_pool_free(prog, map, sizeof(struct fh_map));
 }
 
-int fh_arg_int32(struct fh_program *prog, const struct fh_value *v, const char *fn, int arg_index_0_based,
-                 int32_t *out) {
-    if (!fh_is_number(v)) {
-        return fh_set_error(prog, "%s: expected number/integer for argument %d, got %s",
-                            fn, arg_index_0_based + 1, fh_type_to_str(prog, v->type));
-    }
 
-    if (fh_is_integer(v)) {
-        const int64_t x = v->data.i;
-        if (x < INT32_MIN || x > INT32_MAX) {
-            return fh_set_error(prog, "%s: argument %d out of int32 range", fn, arg_index_0_based + 1);
-        }
-        *out = (int32_t) x;
-        return 0;
+// Must mirror the sizes passed to fh_make_object for each type.
+static size_t object_alloc_size(const union fh_object *obj) {
+    switch (obj->header.type) {
+        case FH_VAL_C_OBJ: return sizeof(struct fh_c_obj);
+        case FH_VAL_STRING: return sizeof(struct fh_string) + obj->str.size;
+        case FH_VAL_CLOSURE:
+            return sizeof(struct fh_closure) + obj->closure.n_upvals * sizeof(struct fh_upval *);
+        case FH_VAL_UPVAL: return sizeof(struct fh_upval);
+        case FH_VAL_FUNC_DEF: return sizeof(struct fh_func_def);
+        case FH_VAL_ARRAY: return sizeof(struct fh_array);
+        case FH_VAL_MAP: return sizeof(struct fh_map);
+        default: return 0;
     }
-
-    const double d = fh_get_float((struct fh_value*)v);
-    if (!isfinite(d)) {
-        return fh_set_error(prog, "%s: argument %d must be finite", fn, arg_index_0_based + 1);
-    }
-    if (d < (double) INT32_MIN || d > (double) INT32_MAX) {
-        return fh_set_error(prog, "%s: argument %d out of int32 range", fn, arg_index_0_based + 1);
-    }
-    if (trunc(d) != d) {
-        return fh_set_error(prog, "%s: argument %d must be an integer value", fn, arg_index_0_based + 1);
-    }
-
-    *out = (int32_t) d;
-    return 0;
 }
-
-int fh_arg_double(struct fh_program *prog, const struct fh_value *v, const char *fn, int arg_index_0_based,
-                  double *out) {
-    if (fh_is_float(v)) {
-        const double d = v->data.num;
-        if (!isfinite(d)) {
-            return fh_set_error(prog, "%s: argument %d must be finite", fn, arg_index_0_based + 1);
-        }
-        *out = d;
-        return 0;
-    }
-    if (fh_is_integer(v)) {
-        *out = (double) v->data.i;
-        return 0;
-    }
-    return fh_set_error(prog, "%s: expected number/integer for argument %d, got %s", fn, arg_index_0_based + 1,
-                        fh_type_to_str(prog, v->type));
-}
-
 
 void fh_free_object(struct fh_program *prog, union fh_object *obj) {
     prog->alive_objects--;
+    const size_t obj_alloc_size = object_alloc_size(obj);
+    if (prog->gc_live_bytes >= obj_alloc_size)
+        prog->gc_live_bytes -= obj_alloc_size;
+    else
+        prog->gc_live_bytes = 0;
 
     switch (obj->header.type) {
         case FH_VAL_NULL:
@@ -107,20 +80,21 @@ void fh_free_object(struct fh_program *prog, union fh_object *obj) {
             if (obj->c_obj.free_callback) {
                 obj->c_obj.free_callback(obj->c_obj.ptr);
             }
-            free(obj);
+            fh_pool_free(prog, obj, sizeof(struct fh_c_obj));
             return;
         }
-        case FH_VAL_STRING: free(obj);
+        case FH_VAL_STRING:
+            fh_pool_free(prog, obj, sizeof(struct fh_string) + obj->str.size);
             return;
-        case FH_VAL_CLOSURE: free_closure(GET_OBJ_CLOSURE(obj));
+        case FH_VAL_CLOSURE: free_closure(prog, GET_OBJ_CLOSURE(obj));
             return;
-        case FH_VAL_UPVAL: free_upval(GET_OBJ_UPVAL(obj));
+        case FH_VAL_UPVAL: free_upval(prog, GET_OBJ_UPVAL(obj));
             return;
-        case FH_VAL_FUNC_DEF: free_func_def(GET_OBJ_FUNC_DEF(obj));
+        case FH_VAL_FUNC_DEF: free_func_def(prog, GET_OBJ_FUNC_DEF(obj));
             return;
-        case FH_VAL_ARRAY: free_array(GET_OBJ_ARRAY(obj));
+        case FH_VAL_ARRAY: free_array(prog, GET_OBJ_ARRAY(obj));
             return;
-        case FH_VAL_MAP: free_map(GET_OBJ_MAP(obj));
+        case FH_VAL_MAP: free_map(prog, GET_OBJ_MAP(obj));
             return;
     }
 
@@ -133,109 +107,6 @@ const char *fh_get_string(const struct fh_value *val) {
     if (val->type != FH_VAL_STRING)
         return NULL;
     return GET_OBJ_STRING_DATA(val->data.obj);
-}
-
-int fh_get_array_len(const struct fh_value *val) {
-    if (val->type != FH_VAL_ARRAY)
-        return -1;
-    return GET_OBJ_ARRAY(val->data.obj)->len;
-}
-
-struct fh_value *fh_get_array_item(struct fh_value *val, uint32_t index) {
-    // if (val->type != FH_VAL_ARRAY)
-    // return NULL;
-
-    const struct fh_array *arr = GET_OBJ_ARRAY(val->data.obj);
-    if (index >= arr->len)
-        return NULL;
-    return &arr->items[index];
-}
-
-void fh_reset_array(struct fh_array *arr) {
-    for (int i = 0; i < arr->len; i++) {
-        arr->items[i].type = FH_VAL_NULL;
-    }
-    arr->len = 0;
-}
-
-int fh_reserve_array_capacity(struct fh_program *prog, struct fh_array *arr, uint32_t min_cap) {
-    if (min_cap <= arr->cap)
-        return 0;
-
-    size_t new_cap = arr->cap ? arr->cap : 8;
-    while (new_cap < min_cap)
-        new_cap *= 2;
-
-    void *new_items = realloc(arr->items, new_cap * sizeof(struct fh_value));
-    if (!new_items) {
-        fh_set_error(prog, "out of memory");
-        return -1;
-    }
-
-    arr->items = new_items;
-    arr->cap = (uint32_t) new_cap;
-    return 0;
-}
-
-struct fh_value *fh_grow_array_object_uninit(struct fh_program *prog, struct fh_array *arr, const uint32_t num_items) {
-    const uint32_t len = arr->len;
-    if (len < arr->cap) {
-        arr->len = len + 1;
-        return &arr->items[len];
-    }
-
-    const size_t need = (size_t) arr->len + num_items;
-    if (need > UINT32_MAX) {
-        fh_set_error(prog, "out of memory");
-        return NULL;
-    }
-
-    if (need > arr->cap) {
-        size_t new_cap = arr->cap ? arr->cap : 16;
-        while (new_cap < need) new_cap *= 2;
-        void *new_items = realloc(arr->items, new_cap * sizeof(struct fh_value));
-        if (!new_items) {
-            fh_set_error(prog, "out of memory");
-            return NULL;
-        }
-        arr->items = new_items;
-        arr->cap = (uint32_t) new_cap;
-    }
-
-    struct fh_value *ret = &arr->items[arr->len];
-    arr->len = need;
-    return ret;
-}
-
-struct fh_value *fh_grow_array_object(struct fh_program *prog, struct fh_array *arr, uint32_t num_items) {
-    if (arr->header.type != FH_VAL_ARRAY)
-        return NULL;
-
-    if ((size_t) arr->len + num_items + 15 < (size_t) arr->len
-        || (size_t) arr->len + num_items + 15 > UINT32_MAX) {
-        fh_set_error(prog, "out of memory");
-        return NULL;
-    }
-    if (arr->len + num_items >= arr->cap) {
-        const size_t new_cap = ((size_t) arr->len + num_items + 15) / 16 * 16;
-        void *new_items = realloc(arr->items, new_cap * sizeof(struct fh_value));
-        if (!new_items) {
-            fh_set_error(prog, "out of memory");
-            return NULL;
-        }
-        arr->items = new_items;
-        arr->cap = (uint32_t) new_cap;
-    }
-    struct fh_value *ret = &arr->items[arr->len];
-    for (uint32_t i = 0; i < num_items; i++) {
-        ret[i].type = FH_VAL_NULL;
-    }
-    arr->len += num_items;
-    return ret;
-}
-
-struct fh_value *fh_grow_array(struct fh_program *prog, struct fh_value *val, uint32_t num_items) {
-    return fh_grow_array_object(prog, GET_OBJ_ARRAY(val->data.obj), num_items);
 }
 
 const char *fh_get_func_def_name(struct fh_func_def *func_def) {
@@ -253,18 +124,23 @@ const char *fh_get_func_def_name(struct fh_func_def *func_def) {
 
 static void *fh_make_object(struct fh_program *prog, const bool pinned, const enum fh_value_type type,
                             const size_t size) {
-    if (prog->gc_frequency >= prog->gc_collect_at) {
+    // Adaptive GC trigger: collect only after allocating at least as many
+    // bytes as the live heap holds (and at least gc_collect_at). This keeps
+    // mark-and-sweep cost proportional to allocation instead of re-walking a
+    // large live heap every gc_collect_at bytes.
+    if (prog->gc_frequency >= prog->gc_collect_at &&
+        prog->gc_frequency >= prog->gc_live_bytes) {
         fh_collect_garbage(prog);
         prog->gc_frequency = 0;
     }
 
-    union fh_object *obj = malloc(size);
+    union fh_object *obj = fh_pool_alloc(prog, size);
     if (!obj) {
         fh_set_error(prog, "out of memory");
         return NULL;
     }
     if (pinned && vec_push(&prog->pinned_objs, obj) != 0) {
-        free(obj);
+        fh_pool_free(prog, obj, size);
         fh_set_error(prog, "out of memory");
         return NULL;
     }
@@ -274,6 +150,7 @@ static void *fh_make_object(struct fh_program *prog, const bool pinned, const en
     obj->header.type = type;
     obj->header.gc_bits = 0;
     prog->gc_frequency += size;
+    prog->gc_live_bytes += size;
 
     prog->alive_objects++;
     return obj;
@@ -476,67 +353,4 @@ const char *fh_type_to_str(struct fh_program *prog, enum fh_value_type type) {
             fh_set_error(prog, "can't get type for object!");
             return "";
     }
-}
-
-double fh_optnumber(struct fh_value *args, int n_args, int check, double opt) {
-    if (n_args <= check) {
-        return opt;
-    }
-    if (args[check].type == FH_VAL_FLOAT)
-        return args[check].data.num;
-
-    return opt;
-}
-
-int64_t fh_optinteger(struct fh_value *args, int n_args, int check, int64_t opt) {
-    if (n_args <= check) {
-        return opt;
-    }
-    if (args[check].type == FH_VAL_INTEGER)
-        return args[check].data.i;
-
-    return opt;
-}
-
-bool fh_optboolean(struct fh_value *args, int n_args, int check, bool opt) {
-    if (n_args <= check) {
-        return opt;
-    }
-    if (args[check].type == FH_VAL_BOOL)
-        return args[check].data.b;
-    return opt;
-}
-
-const char *fh_optstring(struct fh_value *args, int n_args, int check, const char *opt) {
-    if (n_args <= check) {
-        return opt;
-    }
-    if (args[check].type == FH_VAL_STRING)
-        return GET_VAL_STRING_DATA(&args[check]);
-    return opt;
-}
-
-
-void *fh_optcobj(struct fh_value *args, int n_args, int check, short ctype, void *opt) {
-    //NOTE: In this function we also have to check for the user ctype
-    if (n_args <= check) {
-        return opt;
-    }
-    if (args[check].type == FH_VAL_C_OBJ) {
-        struct fh_c_obj *o = fh_get_c_obj(&args[check]);
-        return o->type == ctype ? fh_get_c_obj_value(&args[check]) : opt;
-    }
-
-    return opt;
-}
-
-bool fh_is_c_obj_of_type(struct fh_value *v, int usr_type) {
-    if (!fh_is_c_obj(v))
-        return false;
-
-    struct fh_c_obj *o = fh_get_c_obj(v);
-    if (o->type == usr_type)
-        return true;
-
-    return false;
 }

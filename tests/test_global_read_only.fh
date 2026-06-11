@@ -1,0 +1,9 @@
+let x = 42;
+let y = "hello";
+
+fn main() {
+    print("x = ", x);
+    print("y = ", y);
+    let z = x + 10;
+    print("z = ", z);
+}

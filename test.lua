@@ -1,19 +1,21 @@
--- bench.lua — strict FH-style (Lua 5.1+)
--- Run: lua bench.lua
+-- Equivalent Lua benchmark (as close as possible to your FH script)
+-- Note: Lua arrays are 1-based, so indexing is adjusted.
+
+-- rand01(seed_ref) -> math_random(seed_ref) in FH
+-- In Lua we'll use an explicit LCG to emulate "seed passed by reference".
+-- seed_ref is a table {seed} so functions can mutate it.
 
 local function rand01(seed_ref)
-  local x = seed_ref[1] & 0xFFFFFFFF
-  x = x ~ ((x << 13) & 0xFFFFFFFF)
-  x = x ~ (x >> 17)
-  x = x ~ ((x << 5) & 0xFFFFFFFF)
-  seed_ref[1] = x & 0xFFFFFFFF
-  return (x & 0xFFFFFF) / 16777216.0
+  -- 32-bit LCG (Numerical Recipes style)
+  local s = seed_ref[1] or 0
+  s = (1664525 * s + 1013904223) % 4294967296
+  seed_ref[1] = s
+  return s / 4294967296
 end
 
 local function i32(x)
-  -- truncate toward zero, matching bench.py int() / bench.rb to_i / bench.fh tointeger
-  if x >= 0 then return math.floor(x) end
-  return math.ceil(x)
+  -- Your FH i32() returns 2 always; keep it identical.
+  return 2
 end
 
 local function make_tilemap(w, h, seed_ref)
@@ -23,18 +25,25 @@ local function make_tilemap(w, h, seed_ref)
     if rand01(seed_ref) < 0.18 then t = 1 end
     tiles[i] = t
   end
-  return { ["w"] = w, ["h"] = h, ["tiles"] = tiles }
+  local m = {}
+  m['w'] = w;
+  m['h'] = h;
+  m['tiles'] = tiles;
+  return m
 end
 
 local function tile_at(tiles, w, h, x, y)
+  -- x,y in FH are 0-based tile coords; bounds treat outside as solid (1).
   if x < 0 or y < 0 then return 1 end
   if x >= w or y >= h then return 1 end
-  return tiles[y * w + x + 1] -- FH 0-based -> Lua 1-based
+  -- Convert (x,y) -> 1-based index:
+  return tiles[(y * w + x) + 1]
 end
 
 local function aabb_hits_solid(tiles, w, h, x, y, ew, eh)
-  local x0 = i32(x);     local y0 = i32(y)
-  local x1 = i32(x + ew); local y1 = i32(y + eh)
+  local x0 = i32(x);       local y0 = i32(y)
+  local x1 = i32(x + ew);  local y1 = i32(y + eh)
+
   if tile_at(tiles, w, h, x0, y0) == 1 then return true end
   if tile_at(tiles, w, h, x1, y0) == 1 then return true end
   if tile_at(tiles, w, h, x0, y1) == 1 then return true end
@@ -42,53 +51,43 @@ local function aabb_hits_solid(tiles, w, h, x, y, ew, eh)
   return false
 end
 
-local function spawn_entity(seed, w, h, xs, ys, vxs, vys, ws, hs, onGs, ais, lifes)
-  xs[#xs + 1]    = rand01(seed) * (w - 2) + 1
-  ys[#ys + 1]    = rand01(seed) * (h - 2) + 1
-  vxs[#vxs + 1]  = (rand01(seed) - 0.5) * 6.0
-  vys[#vys + 1]  = (rand01(seed) - 0.5) * 2.0
+local function spawn_entity(seed_ref, w, h, xs, ys, vxs, vys, ws, hs, onGs, ais, lifes)
+  xs[#xs + 1]    = rand01(seed_ref) * (w - 2) + 1
+  ys[#ys + 1]    = rand01(seed_ref) * (h - 2) + 1
+  vxs[#vxs + 1]  = (rand01(seed_ref) - 0.5) * 6.0
+  vys[#vys + 1]  = (rand01(seed_ref) - 0.5) * 2.0
   ws[#ws + 1]    = 0.9
   hs[#hs + 1]    = 0.9
-  onGs[#onGs+1]  = false
-  ais[#ais + 1]  = (rand01(seed) < 0.25)
-  lifes[#lifes+1]= 300 + (rand01(seed) * 600)
+  onGs[#onGs + 1]= false
+  ais[#ais + 1]  = (rand01(seed_ref) < 0.25)
+  lifes[#lifes + 1] = 300 + (rand01(seed_ref) * 600)
 end
 
 local function bench(frames, entities, spawnPerFrame)
   local seed = { 123456789 }
   local map = make_tilemap(128, 72, seed)
-  local w = map["w"]; local h = map["h"]; local tiles = map["tiles"]
+  local w, h, tiles = map.w, map.h, map.tiles
 
   local xs, ys, vxs, vys = {}, {}, {}, {}
   local ws, hs, onGs, ais, lifes = {}, {}, {}, {}, {}
 
-  local i = 0
-  while i < entities do
+  for i = 1, entities do
     spawn_entity(seed, w, h, xs, ys, vxs, vys, ws, hs, onGs, ais, lifes)
-    i = i + 1
   end
 
   local dt = 1.0 / 60.0
   local checksum = 0.0
 
-  -- active entity count tracked separately, matching bench.py / bench.rb / bench.fh
-  local active_len = #xs
-
-  local f = 0
-  while f < frames do
-    local s = 0
-    while s < spawnPerFrame do
+  for f = 1, frames do
+    for s = 1, spawnPerFrame do
       spawn_entity(seed, w, h, xs, ys, vxs, vys, ws, hs, onGs, ais, lifes)
-      s = s + 1
     end
 
-    -- only the freshly spawned entities extend the active length
-    active_len = active_len + spawnPerFrame
-
+    -- in-place compaction across ALL arrays
     local write = 1
-    local n = 1
-    local L = active_len
-    while n <= L do
+    local L = #xs
+
+    for n = 1, L do
       local x  = xs[n];  local y  = ys[n]
       local vx = vxs[n]; local vy = vys[n]
       local ew = ws[n];  local eh = hs[n]
@@ -126,23 +125,25 @@ local function bench(frames, entities, spawnPerFrame)
       if onG then
         vx = vx * (1.0 - 8.0 * dt)
       end
-      life = life - 1
 
+      life = life - 1
       checksum = checksum + x + y + vx + vy
 
       if life > 0 then
-        xs[write] = x; ys[write] = y; vxs[write] = vx; vys[write] = vy
-        ws[write] = ew; hs[write] = eh; onGs[write] = onG; ais[write] = ai; lifes[write] = life
+        xs[write] = x;   ys[write] = y
+        vxs[write] = vx; vys[write] = vy
+        ws[write] = ew;  hs[write] = eh
+        onGs[write] = onG; ais[write] = ai
+        lifes[write] = life
         write = write + 1
       end
-
-      n = n + 1
     end
 
-    -- new active length is the compacted count (1-based: write points past it)
-    active_len = write - 1
-
-    f = f + 1
+    -- trim tails (set to nil so GC can drop refs if needed)
+    for k = write, L do
+      xs[k] = nil; ys[k] = nil; vxs[k] = nil; vys[k] = nil
+      ws[k] = nil; hs[k] = nil; onGs[k] = nil; ais[k] = nil; lifes[k] = nil
+    end
   end
 
   io.write(string.format("%f\n", checksum))

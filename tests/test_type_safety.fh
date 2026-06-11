@@ -1,0 +1,45 @@
+# Test type safety and coercion
+fn main() {
+    # Integer and float operations
+    let i = 10;
+    let f = 3.14;
+
+    # Mixed arithmetic should work
+    let result = i + f;
+    assert(result > 13.0 && result < 13.2);
+
+    # Integer division
+    assert(10 / 3 == 3);  # Integer division
+
+    # Float division
+    assert(10.0 / 3.0 > 3.3 && 10.0 / 3.0 < 3.4);
+
+    # Test type preservation
+    let x = 5;
+    let y = x + 2;
+    assert(y == 7);
+
+    # Test comparison with different types
+    assert(10 == 10.0);  # Should compare values
+    assert(5 < 5.5);
+    assert(3.0 > 2);
+
+    # Test boolean operations
+    let t = true;
+    let f_val = false;
+    assert(t == true);
+    assert(f_val == false);
+    assert(t != f_val);
+
+    # Test null
+    let n = null;
+    assert(n == null);
+
+    # Test string concatenation
+    let s1 = "hello";
+    let s2 = " world";
+    let s3 = s1 + s2;
+    assert(s3 == "hello world");
+
+    print("ok\n");
+}

@@ -1,0 +1,16 @@
+# Test new features
+fn main() {
+    # Test String Interpolation
+    let name = "FH";
+    let msg = "Hello, ${name}!";
+    assert(msg == "Hello, FH!");
+
+    # Test JSON
+    let data = json_parse('{"x": 10}');
+    assert(data["x"] == 10);
+
+    # Test Assert with message
+    assert(true, "This passes");
+
+    print("ok\n");
+}

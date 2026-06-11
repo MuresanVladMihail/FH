@@ -1,0 +1,11 @@
+let x = 42;
+
+fn modify() {
+    x = 100;
+}
+
+fn main() {
+    print("Before: ", x);
+    modify();
+    print("After: ", x);
+}

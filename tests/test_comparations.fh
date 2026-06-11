@@ -1,0 +1,76 @@
+fn assert_true(x)  { if (!x) error("expected true"); }
+fn assert_false(x) { if ( x) error("expected false"); }
+
+fn main(args)
+{
+    #
+    # ===== INT compares  =====
+    #
+    assert_true(  1 < 2 );
+    assert_false( 2 < 1 );
+    assert_true(  2 > 1 );
+    assert_false( 1 > 2 );
+
+    # LEI
+    assert_true(  2 <= 2 );
+    assert_true(  1 <= 2 );
+    assert_false( 3 <= 2 );
+
+    # GEI
+    assert_true(  2 >= 2 );
+    assert_true(  3 >= 2 );
+    assert_false( 1 >= 2 );
+
+    # invert_test paths (NOT)
+    assert_false( !(1 < 2) );
+    assert_true(  !(2 < 1) );
+
+    assert_false( !(1 <= 2) );
+    assert_true(  !(3 <= 2) );
+
+    assert_false( !(3 >= 2) );
+    assert_true(  !(1 >= 2) );
+
+    #
+    # ===== FLOAT compares =====
+    #
+    assert_true(  1.0 < 2.0 );
+    assert_false( 2.0 < 1.0 );
+    assert_true(  2.0 > 1.0 );
+    assert_false( 1.0 > 2.0 );
+
+    # LEF
+    assert_true(  2.0 <= 2.0 );
+    assert_true(  1.0 <= 2.0 );
+    assert_false( 3.0 <= 2.0 );
+
+    # GEF
+    assert_true(  2.0 >= 2.0 );
+    assert_true(  3.0 >= 2.0 );
+    assert_false( 1.0 >= 2.0 );
+
+    # invert_test paths (NOT) on float
+    assert_false( !(1.0 < 2.0) );
+    assert_true(  !(2.0 < 1.0) );
+
+    assert_false( !(1.0 <= 2.0) );
+    assert_true(  !(3.0 <= 2.0) );
+
+    assert_false( !(3.0 >= 2.0) );
+    assert_true(  !(1.0 >= 2.0) );
+
+    #
+    # ===== EQ / NEQ =====
+    #
+    assert_true(  2 == 2 );
+    assert_false( 2 == 3 );
+    assert_true(  2 != 3 );
+    assert_false( 2 != 2 );
+
+    assert_true(  2.0 == 2.0 );
+    assert_false( 2.0 == 3.0 );
+    assert_true(  2.0 != 3.0 );
+    assert_false( 2.0 != 2.0 );
+
+    print("ok\n");
+}

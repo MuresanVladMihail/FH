@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
+#include <ctype.h>
 
 #include "parser.h"
 #include "ast.h"
@@ -359,7 +360,7 @@ static int resolve_expr_stack(struct fh_parser *p, struct fh_src_loc loc,
 
 static bool expr_is_lvalue(struct fh_p_expr *e) {
     if (!e) return false;
-    return e->type == EXPR_VAR || e->type == EXPR_INDEX;
+    return e->type == EXPR_VAR || e->type == EXPR_INDEX || e->type == EXPR_OPTIONAL_INDEX;
 }
 
 static struct fh_p_expr *parse_expr(struct fh_parser *p, bool consume_stop, char *stop_chars) {
@@ -603,6 +604,45 @@ static struct fh_p_expr *parse_expr(struct fh_parser *p, bool consume_stop, char
                     goto err;
                 }
             } else {
+                // Special handling for optional chaining operator ?.
+                if (tok_is_op(&tok, "?.")) {
+                    // Expect [ to follow
+                    struct fh_token bracket_tok;
+                    if (get_token(p, &bracket_tok) < 0)
+                        goto err;
+                    if (!tok_is_punct(&bracket_tok, '[')) {
+                        fh_parse_error(p, bracket_tok.loc, "expected '[' after '?.'");
+                        goto err;
+                    }
+
+                    // Resolve expression stack and pop container
+                    if (resolve_expr_stack(p, tok.loc, &opns, &oprs, FUNC_CALL_PREC) < 0)
+                        goto err;
+                    struct fh_p_expr *container = pop_opn(&opns);
+                    if (!container) {
+                        fh_parse_error(p, tok.loc, "syntax error (no container on stack!)");
+                        goto err;
+                    }
+
+                    // Create optional index expression
+                    struct fh_p_expr *expr = new_expr(p, tok.loc, EXPR_OPTIONAL_INDEX, 0);
+                    if (!expr) {
+                        fh_free_expr(container);
+                        goto err;
+                    }
+                    expr->data.index.container = container;
+                    expr->data.index.index = parse_expr(p, true, "]");
+                    if (!expr->data.index.index) {
+                        free(expr);
+                        fh_free_expr(container);
+                        goto err;
+                    }
+
+                    push_opn(&opns, expr);
+                    expect_opn = false;
+                    continue;
+                }
+
                 struct fh_operator *op = fh_get_binary_op(tok.data.op_name);
                 if (!op) {
                     fh_parse_error_expected(p, tok.loc, "'(' or binary operator");
@@ -648,11 +688,187 @@ static struct fh_p_expr *parse_expr(struct fh_parser *p, bool consume_stop, char
                 fh_parse_error_expected(p, tok.loc, "'(' or operator");
                 goto err;
             }
-            struct fh_p_expr *str = new_expr(p, tok.loc, EXPR_STRING, 0);
-            if (!str)
-                goto err;
-            str->data.str = tok.data.str;
-            push_opn(&opns, str);
+
+            // Check for string interpolation ${...}
+            const char *str_content = fh_get_ast_string(p->ast, tok.data.str);
+            const char *interp_start = strstr(str_content, "${");
+
+            if (interp_start == NULL) {
+                // No interpolation - simple string
+                struct fh_p_expr *str = new_expr(p, tok.loc, EXPR_STRING, 0);
+                if (!str)
+                    goto err;
+                str->data.str = tok.data.str;
+                push_opn(&opns, str);
+                expect_opn = false;
+                continue;
+            }
+
+            // String interpolation - parse and build concatenation tree
+            struct fh_p_expr *result = NULL;
+            const char *current = str_content;
+
+            while (current && *current) {
+                const char *dollar = strstr(current, "${");
+
+                if (dollar == NULL) {
+                    // Remaining literal string
+                    if (*current) {
+                        struct fh_p_expr *lit = new_expr(p, tok.loc, EXPR_STRING, 0);
+                        if (!lit) {
+                            fh_free_expr(result);
+                            goto err;
+                        }
+                        lit->data.str = fh_buf_add_string(&p->ast->string_pool, current, strlen(current));
+                        if (lit->data.str < 0) {
+                            free(lit);
+                            fh_free_expr(result);
+                            fh_parse_error_oom(p, tok.loc);
+                            goto err;
+                        }
+
+                        if (result == NULL) {
+                            result = lit;
+                        } else {
+                            struct fh_p_expr *concat = new_expr(p, tok.loc, EXPR_BIN_OP, 0);
+                            if (!concat) {
+                                fh_free_expr(lit);
+                                fh_free_expr(result);
+                                goto err;
+                            }
+                            concat->data.bin_op.op = '+';
+                            concat->data.bin_op.left = result;
+                            concat->data.bin_op.right = lit;
+                            result = concat;
+                        }
+                    }
+                    break;
+                }
+
+                // Add literal part before ${
+                if (dollar > current) {
+                    struct fh_p_expr *lit = new_expr(p, tok.loc, EXPR_STRING, 0);
+                    if (!lit) {
+                        fh_free_expr(result);
+                        goto err;
+                    }
+                    size_t len = dollar - current;
+                    lit->data.str = fh_buf_add_string(&p->ast->string_pool, current, len);
+                    if (lit->data.str < 0) {
+                        free(lit);
+                        fh_free_expr(result);
+                        fh_parse_error_oom(p, tok.loc);
+                        goto err;
+                    }
+
+                    if (result == NULL) {
+                        result = lit;
+                    } else {
+                        struct fh_p_expr *concat = new_expr(p, tok.loc, EXPR_BIN_OP, 0);
+                        if (!concat) {
+                            fh_free_expr(lit);
+                            fh_free_expr(result);
+                            goto err;
+                        }
+                        concat->data.bin_op.op = '+';
+                        concat->data.bin_op.left = result;
+                        concat->data.bin_op.right = lit;
+                        result = concat;
+                    }
+                }
+
+                // Find matching }
+                const char *expr_start = dollar + 2;
+                const char *expr_end = strchr(expr_start, '}');
+                if (expr_end == NULL) {
+                    fh_free_expr(result);
+                    fh_parse_error(p, tok.loc, "unterminated ${...} in string interpolation");
+                    goto err;
+                }
+
+                // Parse expression inside ${...}
+                // For now, support variable names and simple expressions
+                size_t expr_len = expr_end - expr_start;
+
+                // Trim whitespace
+                while (expr_len > 0 && isspace((unsigned char)*expr_start)) {
+                    expr_start++;
+                    expr_len--;
+                }
+                while (expr_len > 0 && isspace((unsigned char)expr_start[expr_len - 1])) {
+                    expr_len--;
+                }
+
+                if (expr_len == 0) {
+                    fh_free_expr(result);
+                    fh_parse_error(p, tok.loc, "empty expression in ${...}");
+                    goto err;
+                }
+
+                // Create expression node - for now just support variable names
+                // TODO: Support full expressions by recursively calling parser
+                char *expr_str = malloc(expr_len + 1);
+                if (!expr_str) {
+                    fh_free_expr(result);
+                    fh_parse_error_oom(p, tok.loc);
+                    goto err;
+                }
+                memcpy(expr_str, expr_start, expr_len);
+                expr_str[expr_len] = '\0';
+
+                // Add variable name to symbol table
+                fh_symbol_id sym_id = fh_add_symbol(&p->ast->symtab, expr_str);
+                free(expr_str);
+
+                if (sym_id < 0) {
+                    fh_free_expr(result);
+                    fh_parse_error_oom(p, tok.loc);
+                    goto err;
+                }
+
+                // Create variable expression
+                struct fh_p_expr *expr = new_expr(p, tok.loc, EXPR_VAR, 0);
+                if (!expr) {
+                    fh_free_expr(result);
+                    fh_parse_error_oom(p, tok.loc);
+                    goto err;
+                }
+                expr->data.var = sym_id;
+
+                // Add expression to result
+                if (result == NULL) {
+                    result = expr;
+                } else {
+                    struct fh_p_expr *concat = new_expr(p, tok.loc, EXPR_BIN_OP, 0);
+                    if (!concat) {
+                        fh_free_expr(expr);
+                        fh_free_expr(result);
+                        goto err;
+                    }
+                    concat->data.bin_op.op = '+';
+                    concat->data.bin_op.left = result;
+                    concat->data.bin_op.right = expr;
+                    result = concat;
+                }
+
+                current = expr_end + 1;
+            }
+
+            if (result == NULL) {
+                // Empty interpolation resulted in empty string
+                struct fh_p_expr *str = new_expr(p, tok.loc, EXPR_STRING, 0);
+                if (!str)
+                    goto err;
+                str->data.str = fh_buf_add_string(&p->ast->string_pool, "", 0);
+                if (str->data.str < 0) {
+                    free(str);
+                    fh_parse_error_oom(p, tok.loc);
+                    goto err;
+                }
+                result = str;
+            }
+
+            push_opn(&opns, result);
             expect_opn = false;
             continue;
         }
@@ -1099,17 +1315,44 @@ static struct fh_p_expr *parse_func(struct fh_parser *p) {
     if (get_token(p, &tok) < 0 && !opt_paranthesis)
         return NULL;
     fh_symbol_id params[64];
+    struct fh_p_expr *defaults[64];
     int n_params = 0;
+    bool has_defaults = false;
+
+    // Initialize defaults array
+    for (int i = 0; i < 64; i++) {
+        defaults[i] = NULL;
+    }
+
     if (!tok_is_punct(&tok, ')') && !opt_paranthesis) {
         while (1) {
             if (!tok_is_symbol(&tok))
                 return fh_parse_error_expected(p, tok.loc, "name");
             if (n_params >= ARRAY_SIZE(params))
                 return fh_parse_error(p, tok.loc, "too many parameters");
-            params[n_params++] = tok.data.symbol_id;
+            params[n_params] = tok.data.symbol_id;
 
             if (get_token(p, &tok) < 0)
                 return NULL;
+
+            // Check for default value
+            if (tok_is_op(&tok, "=")) {
+                has_defaults = true;
+                // Parse default value expression
+                struct fh_p_expr *default_val = parse_expr(p, false, ",)");
+                if (!default_val)
+                    return NULL;
+                defaults[n_params] = default_val;
+
+                if (get_token(p, &tok) < 0)
+                    return NULL;
+            } else if (has_defaults) {
+                // Once we have a default parameter, all following must have defaults
+                return fh_parse_error(p, tok.loc, "non-default parameter follows default parameter");
+            }
+
+            n_params++;
+
             if (tok_is_punct(&tok, ')'))
                 break;
             if (!tok_is_punct(&tok, ','))
@@ -1119,12 +1362,18 @@ static struct fh_p_expr *parse_func(struct fh_parser *p) {
         }
     }
 
-    struct fh_p_expr *func = new_expr(p, tok.loc, EXPR_FUNC, n_params * sizeof(fh_symbol_id));
+    // Allocate space for params and default_values array
+    size_t extra_size = n_params * sizeof(fh_symbol_id) + n_params * sizeof(struct fh_p_expr *);
+    struct fh_p_expr *func = new_expr(p, tok.loc, EXPR_FUNC, extra_size);
     if (!func)
         return NULL;
     func->data.func.n_params = n_params;
     func->data.func.params = (fh_symbol_id *) ((char *) func + sizeof(struct fh_p_expr));
     memcpy(func->data.func.params, params, n_params * sizeof(fh_symbol_id));
+
+    // Copy default values array
+    func->data.func.default_values = (struct fh_p_expr **) ((char *) func->data.func.params + n_params * sizeof(fh_symbol_id));
+    memcpy(func->data.func.default_values, defaults, n_params * sizeof(struct fh_p_expr *));
 
     if (!opt_paranthesis && get_token(p, &tok) < 0)
         return NULL;
@@ -1242,6 +1491,45 @@ int fh_parse(struct fh_parser *p, struct fh_ast *ast, struct fh_input *in) {
             if (!func)
                 return -1;
             vec_push(p->ast->func_vector, func);
+            continue;
+        }
+        if (tok_is_keyword(&tok, KW_LET)) {
+            // Parse global variable: let name = value;
+            struct fh_p_global_var *var = fh_new_global_var(p->ast, tok.loc);
+            if (!var) {
+                fh_parse_error_oom(p, tok.loc);
+                return -1;
+            }
+
+            // Variable name
+            if (get_token(p, &tok) < 0)
+                return -1;
+            if (!tok_is_symbol(&tok)) {
+                fh_free_global_var(var);
+                fh_parse_error_expected(p, tok.loc, "variable name");
+                return -1;
+            }
+            var->name = tok.data.symbol_id;
+
+            // '=' sign
+            if (get_token(p, &tok) < 0) {
+                fh_free_global_var(var);
+                return -1;
+            }
+            if (!tok_is_op(&tok, "=")) {
+                fh_free_global_var(var);
+                fh_parse_error_expected(p, tok.loc, "'='");
+                return -1;
+            }
+
+            // Initial value expression (parse_expr with consume_stop=true will consume the semicolon)
+            var->init_val = parse_expr(p, true, ";");
+            if (!var->init_val) {
+                fh_free_global_var(var);
+                return -1;
+            }
+
+            vec_push(p->ast->global_vars_vector, var);
             continue;
         }
         if (tok_is_keyword(&tok, KW_INCLUDE)) {

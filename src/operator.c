@@ -8,6 +8,7 @@
 
 static struct fh_operator ops[] = {
     {'=', "=", FH_ASSOC_RIGHT, 10},
+    {'?', "?", FH_ASSOC_LEFT, 5},  // Placeholder for ternary operator (future use)
 
     {AST_OP_OR, "||", FH_ASSOC_LEFT, 20},
     {AST_OP_AND, "&&", FH_ASSOC_LEFT, 30},
@@ -36,6 +37,7 @@ static struct fh_operator ops[] = {
     {'^', "^", FH_ASSOC_RIGHT, 110},
     {AST_OP_PRE_INC, "++", FH_ASSOC_PREFIX, 100},
     {AST_OP_PRE_DEC, "--", FH_ASSOC_PREFIX, 100},
+    {AST_OP_OPTIONAL_INDEX, "?.", FH_ASSOC_LEFT, FUNC_CALL_PREC},  // Same precedence as function calls and indexing
 };
 
 static struct fh_operator *find_op(const char *name, unsigned int assoc_mask) {

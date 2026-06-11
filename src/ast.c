@@ -13,6 +13,9 @@ struct fh_ast *fh_new_ast(struct fh_symtab *file_names) {
     ast->func_vector = malloc(sizeof(vec_void_t));
     vec_init(ast->func_vector);
 
+    ast->global_vars_vector = malloc(sizeof(vec_void_t));
+    vec_init(ast->global_vars_vector);
+
     ast->file_names = file_names;
     fh_init_symtab(&ast->symtab);
     fh_init_buffer(&ast->string_pool);
@@ -23,6 +26,10 @@ void fh_free_ast(struct fh_ast *ast) {
     fh_free_named_func_vector(ast->func_vector);
     vec_deinit(ast->func_vector);
     free(ast->func_vector);
+
+    fh_free_global_vars_vector(ast->global_vars_vector);
+    vec_deinit(ast->global_vars_vector);
+    free(ast->global_vars_vector);
 
     fh_destroy_buffer(&ast->string_pool);
     fh_destroy_symtab(&ast->symtab);
@@ -53,6 +60,15 @@ struct fh_p_named_func *fh_new_named_func(struct fh_ast *ast, struct fh_src_loc 
     func->next = NULL;
     func->loc = loc;
     return func;
+}
+
+struct fh_p_global_var *fh_new_global_var(struct fh_ast *ast, struct fh_src_loc loc) {
+    UNUSED(ast);
+    struct fh_p_global_var *var = malloc(sizeof(struct fh_p_global_var));
+    var->next = NULL;
+    var->loc = loc;
+    var->init_val = NULL;
+    return var;
 }
 
 struct fh_p_expr *fh_new_expr(struct fh_ast *ast, struct fh_src_loc loc, enum fh_expr_type type, size_t extra_size) {
@@ -106,6 +122,19 @@ void fh_free_named_func_vector(vec_void_t *vector) {
     }
 }
 
+void fh_free_global_var(struct fh_p_global_var *var) {
+    if (var->init_val)
+        fh_free_expr(var->init_val);
+    free(var);
+}
+
+void fh_free_global_vars_vector(vec_void_t *vector) {
+    for (int i = 0; i < vector->length; i++) {
+        struct fh_p_global_var *v = (struct fh_p_global_var *) vector->data[i];
+        fh_free_global_var(v);
+    }
+}
+
 void fh_free_expr_children(struct fh_p_expr *expr) {
     switch (expr->type) {
         case EXPR_NONE:
@@ -128,6 +157,7 @@ void fh_free_expr_children(struct fh_p_expr *expr) {
             return;
 
         case EXPR_INDEX:
+        case EXPR_OPTIONAL_INDEX:
             fh_free_expr(expr->data.index.container);
             fh_free_expr(expr->data.index.index);
             return;
@@ -289,6 +319,7 @@ int fh_ast_visit_expr_nodes(struct fh_p_expr *expr, int (*visit)(struct fh_p_exp
             return 0;
 
         case EXPR_INDEX:
+        case EXPR_OPTIONAL_INDEX:
             if ((ret = fh_ast_visit_expr_nodes(expr->data.index.container, visit, data)) != 0)
                 return ret;
             if ((ret = fh_ast_visit_expr_nodes(expr->data.index.index, visit, data)) != 0)

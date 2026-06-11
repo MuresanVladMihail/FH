@@ -1,3 +1,9 @@
-fn main() {
-    
+fn bench_mod(N) {
+    let s = 0;
+    for (let i=0;i<N;i++) {
+        s = s + (i % 10);
+    }
+    println(s);
 }
+
+fn main(){ bench_mod(400000000); }
