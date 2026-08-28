@@ -188,7 +188,7 @@ All features are tested in `tests/test_new_features.fh`:
 ./fh tests/test_new_features.fh
 ```
 
-Full test suite (39 tests, all passing):
+Full test suite (all passing):
 
 ```bash
 ./run_tests.sh

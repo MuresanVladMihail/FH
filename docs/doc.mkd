@@ -1,145 +1,442 @@
-# Introduction
-FH is a simple to use and learn programming language meant to be used as a 
-scripting language.
+# The FH Language
 
-FH is being written in the C programming language and it runs on: GNU/Linux, MacOS and Windows. 
-Porting FH to other platforms should be quite straightforward given a C99 compiler exists on the targeted platform.
+FH is a small, dynamically-typed scripting language designed to be embedded
+inside native applications (particularly game engines). It compiles source
+to bytecode and runs on a register-based virtual machine with an automatic
+mark-and-sweep garbage collector. The whole implementation is C99, ~10k
+lines, with no external runtime dependencies.
 
-# Basic concepts
-    This section describes the basic concepts of the language.
+This document has two parts:
 
-## Values and types
-FH is a dynamically typed language. This means that variables do not have types; only values do. There are no type definitions in the language. All values carry their own type.
+1. **Language basics** — syntax, types, control flow, functions.
+2. **Standard library reference** — every built-in function, grouped by
+   category, with parameters, return values and short examples.
 
-All values in FH are first-class values. This means that all values can be stored in variables, passed as arguments to other functions, and returned as results.
+For build instructions and the embedding API, see [`README.md`](../README.md)
+and [`src/fh.h`](../src/fh.h).
 
-There are eight basic types in FH: null, boolean, number, string, function, userdata, array and map. 
+---
 
-  * The type null has one single value, null, whose main property is to be different from any other value; it usually represents the absence of a useful value.
+## 1. Language basics
 
- * The type boolean has two values, false and true. Both null and false make a condition false; any other value makes it true. The type number represents both integer numbers and real (floating-point) numbers. 
+### 1.1 Comments
 
-* The type string represents immutable sequences of bytes. FH supports unicode and it makes no assumptions about the contents of a string.
+```
+# this is a single-line comment, runs to the end of the line
 
-* The type number represents 32-bit floating points numbers
+#-
+  this is a block comment.
+  it can span multiple lines.
+-#
+```
 
-* The type userdata is provided to allow arbitrary C data to be stored in FH variables. A userdata value represents a block of raw memory.
+### 1.2 Values and types
 
-* The type array is of type associative array, that is, arrays that can have as indices not only numbers but any FH value, including null.
+FH is dynamically typed: variables don't carry a type, only values do.
+There are eight kinds of value:
 
-* The type map can be heterogeneous; that is, they can contain values of all types. All keys must have a type different than null. Trying to use a key which is not part of the map will result in an error. 
+- `null` — the absence of a value.
+- `boolean` — `true` or `false`. Only `null` and `false` are falsy; every
+  other value (including `0` and `""`) is truthy.
+- `number` — FH has two numeric subtypes, **integer** and **float**. An
+  integer literal (`10`) produces an integer value; a literal with a
+  decimal point or exponent (`10.0`, `1e3`) produces a float. Most
+  arithmetic promotes to float when either operand is a float.
+- `string` — immutable byte sequences, written with single or double
+  quotes: `"hello"`, `'hello'`.
+- `array` — an ordered, growable list of values of any type:
+  `[1, "two", [3]]`.
+- `map` — a hash map keyed by any non-null value:
+  `{"a": 1, true: "yes"}`.
+- `closure` (function) — first-class; functions defined with `fn` are
+  values and can be stored, passed and returned like any other value.
+- `c_obj` — an opaque handle around host (C) data, used by bindings such
+  as the file/tar I/O functions below. Scripts can't construct one
+  directly; the standard library hands them out (e.g. `io_open`).
 
-## Garbage collection
+Use `type(x)` to get a value's type name as a string, and `has()` (below) to
+locate a value inside an array or map.
 
-FH performs automatic memory management. This means that you do not have to worry about allocating memory for new objects or freeing it when the objects are no longer needed. FH manages memory automatically by running a garbage collector to collect all dead objects (that is, objects that are no longer accessible from FH). The algorithm used for performing this task is called "mark and sweep".
+### 1.3 Variables
 
-Since the algorithm used for garbage collecting is part of the tracing algorithms that means the program will stop from executing from a brief moment in which the GC is being executed.
+Declare a variable with `let`:
 
-The frequency at which the GC is called can be controlled using the function `gc_frequency()` which expects a number larger or equal to 1000000 (1MB). This means that every time FH allocates more than the given threshold the GC will be fired up.
+```
+let x = 10;
+let name = "FH";
+let nothing;        # implicitly null
+```
 
-In extreme cases the GC can be paused and resumed as the programmer pleases using the function `gc_pause` which expects a boolean to determine if the GC should be paused or resumed. The garbage collector can be  forcefully triggered by the programmer by calling the function `gc()`.
+`let` inside a function creates a local, block-scoped variable. `let` at
+the top level of a script creates a global that every function in the
+script can read (see `tests/test_globals.fh`).
 
-If you want to know how much memory is currently allocated by the executing program then function `gc_info()` will return a number of bytes which indicates this.
+By convention (not enforced by the language) an `ALL_CAPS` name signals
+"treat this as a constant" — FH has no dedicated `const` keyword.
 
-# The language  TODO
-This section describes the lexis, the syntax, and the semantics of Lua. In other words, this section describes which tokens are valid, how they can be combined, and what their combinations mean.
+### 1.4 Operators
 
-Language constructs will be explained using the usual extended BNF notation, in which {a} means 0 or more a's, and [a] means an optional a. Non-terminals are shown like non-terminal, keywords are shown like kword, and other terminal symbols are shown like ‘=’. The complete syntax of Lua can be found in §9 at the end of this manual.
+```
+Arithmetic:   +  -  *  /  %
+Comparison:   ==  !=  <  >  <=  >=
+Logical:      &&  ||  !
+Bitwise:      &  |  ^  ~  <<  >>
+Increment:    ++x  x++  --x  x--   (prefix and postfix)
+Assignment:   =
+String concat: +          (e.g. "a" + "b" == "ab")
+Optional index: ?.[...]   (see 1.9)
+```
 
-## Lexical Conventions
-Lua is a free-form language. It ignores spaces (including new lines) and comments between lexical elements (tokens), except as delimiters between names and keywords.
+There is no ternary `?:` operator.
 
-Names (also called identifiers) in Lua can be any string of letters, digits, and underscores, not beginning with a digit and not being a reserved word. Identifiers are used to name variables, table fields, and labels.
+### 1.5 Control flow
 
-The following keywords are reserved and cannot be used as names:
+```
+if (x > 0) {
+    ...
+} elif (x == 0) {
+    ...
+} else {
+    ...
+}
 
-     and       break     do        else      elseif    end
-     false     for       function  goto      if        in
-     local     nil       not       or        repeat    return
-     then      true      until     while
-Lua is a case-sensitive language: and is a reserved word, but And and AND are two different, valid names. As a convention, programs should avoid creating names that start with an underscore followed by one or more uppercase letters (such as _VERSION).
+while (x < 10) {
+    x = x + 1;
+}
 
-The following strings denote other tokens:
+# repeat/until executes the block at least once, then keeps looping
+# for as long as the condition stays TRUE (it stops the moment the
+# condition becomes false) -- this is the opposite convention from
+# Lua's "repeat ... until", so don't assume the two behave the same.
+let a = 0;
+repeat {
+    a = a + 1;
+} until (a < 5);   # loops while a < 5, so this ends with a == 5
 
-     +     -     *     /     %     ^     #
-     &     ~     |     <<    >>    //
-     ==    ~=    <=    >=    <     >     =
-     (     )     {     }     [     ]     ::
-     ;     :     ,     .     ..    ...
-A short literal string can be delimited by matching single or double quotes, and can contain the following C-like escape sequences: '\a' (bell), '\b' (backspace), '\f' (form feed), '\n' (newline), '\r' (carriage return), '\t' (horizontal tab), '\v' (vertical tab), '\\' (backslash), '\"' (quotation mark [double quote]), and '\'' (apostrophe [single quote]). A backslash followed by a line break results in a newline in the string. The escape sequence '\z' skips the following span of white-space characters, including line breaks; it is particularly useful to break and indent a long literal string into multiple lines without adding the newlines and spaces into the string contents. A short literal string cannot contain unescaped line breaks nor escapes not forming a valid escape sequence.
+for (let i = 0; i < 10; i = i + 1) {
+    if (i == 5) { continue; }
+    if (i == 9) { break; }
+}
+```
 
-We can specify any byte in a short literal string by its numeric value (including embedded zeros). This can be done with the escape sequence \xXX, where XX is a sequence of exactly two hexadecimal digits, or with the escape sequence \ddd, where ddd is a sequence of up to three decimal digits. (Note that if a decimal escape sequence is to be followed by a digit, it must be expressed using exactly three digits.)
+Any of the three `for` clauses may be omitted (`for (; i < 10; i = i + 1)`).
 
-The UTF-8 encoding of a Unicode character can be inserted in a literal string with the escape sequence \u{XXX} (note the mandatory enclosing brackets), where XXX is a sequence of one or more hexadecimal digits representing the character code point.
+### 1.6 Functions and closures
 
-Literal strings can also be defined using a long format enclosed by long brackets. We define an opening long bracket of level n as an opening square bracket followed by n equal signs followed by another opening square bracket. So, an opening long bracket of level 0 is written as [[, an opening long bracket of level 1 is written as [=[, and so on. A closing long bracket is defined similarly; for instance, a closing long bracket of level 4 is written as ]====]. A long literal starts with an opening long bracket of any level and ends at the first closing long bracket of the same level. It can contain any text except a closing bracket of the same level. Literals in this bracketed form can run for several lines, do not interpret any escape sequences, and ignore long brackets of any other level. Any kind of end-of-line sequence (carriage return, newline, carriage return followed by newline, or newline followed by carriage return) is converted to a simple newline.
+```
+fn add(a, b) {
+    return a + b;
+}
 
-For convenience, when the opening long bracket is immediately followed by a newline, the newline is not included in the string. As an example, in a system using ASCII (in which 'a' is coded as 97, newline is coded as 10, and '1' is coded as 49), the five literal strings below denote the same string:
+# default parameter values
+fn greet(name, greeting = "Hello") {
+    printf("%s, %s!\n", greeting, name);
+}
+greet("Alice");        # "Hello, Alice!"
+greet("Bob", "Hi");     # "Hi, Bob!"
 
-     a = 'alo\n123"'
-     a = "alo\n123\""
-     a = '\97lo\10\04923"'
-     a = [[alo
-     123"]]
-     a = [==[
-     alo
-     123"]==]
-Any byte in a literal string not explicitly affected by the previous rules represents itself. However, Lua opens files for parsing in text mode, and the system file functions may have problems with some control characters. So, it is safer to represent non-text data as a quoted literal with explicit escape sequences for the non-text characters.
+# functions are values, and closures capture their enclosing scope
+fn make_counter(start) {
+    return {
+        "next": fn() { start = start + 1; },
+        "read": fn() { return start; },
+    };
+}
+let c = make_counter(0);
+c.next();
+c.next();
+print(c.read());   # 2
+```
 
-A numeric constant (or numeral) can be written with an optional fractional part and an optional decimal exponent, marked by a letter 'e' or 'E'. Lua also accepts hexadecimal constants, which start with 0x or 0X. Hexadecimal constants also accept an optional fractional part plus an optional binary exponent, marked by a letter 'p' or 'P'. A numeric constant with a radix point or an exponent denotes a float; otherwise, if its value fits in an integer, it denotes an integer. Examples of valid integer constants are
+A function definition can carry a docstring, retrievable with
+`docstring(fn)`:
 
-     3   345   0xff   0xBEBADA
-Examples of valid float constants are
+```
+fn area(w, h) : "computes the area of a rectangle" {
+    return w * h;
+}
+docstring(area);   # "computes the area of a rectangle"
+```
 
-     3.0     3.1416     314.16e-2     0.31416E1     34e1
-     0x0.1E  0xA23p-4   0X1.921FB54442D18P+1
-A comment starts with a double hyphen (--) anywhere outside a string. If the text immediately after -- is not an opening long bracket, the comment is a short comment, which runs until the end of the line. Otherwise, it is a long comment, which runs until the corresponding closing long bracket. Long comments are frequently used to disable code temporarily.
+### 1.7 Arrays and maps
 
-## Variables
-Variables are places that store values. There are three kinds of variables in Lua: global variables, local variables, and table fields.
+```
+let a = [1, "two", [3, 4]];
+a[0];                 # 1
+append(a, "five");    # appends in place, also returns the array
+len(a);                # 4
+delete(a, 0);          # removes index 0, returns the removed value
 
-A single name can denote a global variable or a local variable (or a function's formal parameter, which is a particular kind of local variable):
+let m = {"name": "FH", "version": 1};
+m.name;                 # "FH"        (dot access, when the key is an identifier)
+m["version"];           # 1           (bracket access, works for any key type)
+m.new_key = true;       # adding a new key
+contains_key(m, "name"); # true
+delete(m, "name");       # removes the key, returns the removed value
+```
 
-	var ::= Name
-Name denotes identifiers, as defined in §3.1.
+`len()` and `append()` are compiler intrinsics (compiled to dedicated
+bytecode, not ordinary function calls) and work on arrays, maps and
+strings (`len` only) — see section 2 for the rest of the array/map helpers
+(`has`, `reset`, `next_key`, `reserve`, ...).
 
-Any variable name is assumed to be global unless explicitly declared as a local (see §3.3.7). Local variables are lexically scoped: local variables can be freely accessed by functions defined inside their scope (see §3.5).
+### 1.8 String interpolation
 
-Before the first assignment to a variable, its value is nil.
+`${expr}` inside a string literal is expanded at compile time into string
+concatenation:
 
-Square brackets are used to index a table:
+```
+let name = "Alice";
+let age = 30;
+print("Hello, ${name}! You are ${age} years old.");
+# same as: "Hello, " + name + "! You are " + age + " years old."
+```
 
-	var ::= prefixexp ‘[’ exp ‘]’
-The meaning of accesses to table fields can be changed via metatables (see §2.4).
+### 1.9 Optional chaining
 
-The syntax var.Name is just syntactic sugar for var["Name"]:
+`?.[key]` performs the same lookup as `[key]`, but short-circuits to
+`null` (instead of erroring) when the value being indexed is `null`:
 
-	var ::= prefixexp ‘.’ Name
-An access to a global variable x is equivalent to _ENV.x. Due to the way that chunks are compiled, _ENV is never a global name (see §2.2).
+```
+let user = {"profile": {"city": "NYC"}};
+user?.["profile"]?.["city"];     # "NYC"
+let missing = null;
+missing?.["profile"];             # null, no error
+```
 
-## Statements
-Lua supports an almost conventional set of statements, similar to those in Pascal or C. This set includes assignments, control structures, function calls, and variable declarations.
+### 1.10 Errors
 
-## Blocks
-A block is a list of statements, which are executed sequentially:
+`error("message")` aborts the running script with an error (see it used
+throughout the standard library — most built-ins fail this way instead of
+crashing). `assert(cond)` / `assert(cond, "message")` raises an error if
+`cond` is falsy. FH programs get a full stack trace on error:
 
-	block ::= {stat}
-Lua has empty statements that allow you to separate statements with semicolons, start a block with a semicolon or write two semicolons in sequence:
+```
+ERROR: file.fh:5:14: error: division by zero
 
-	stat ::= ‘;’
-Function calls and assignments can start with an open parenthesis. This possibility leads to an ambiguity in Lua's grammar. Consider the following fragment:
+Traceback (most recent call last):
+  File "file.fh", line 33, in main
+  File "file.fh", line 20, in process_data
+  File "file.fh", line 5, in divide
+```
 
-     a = b + c
-     (print or io.write)('done')
-The grammar could see it in two ways:
+### 1.11 Multi-file scripts
 
-     a = b + c(print or io.write)('done')
-     
-     a = b + c; (print or io.write)('done')
-The current parser always sees such constructions in the first way, interpreting the open parenthesis as the start of the arguments to a call. To avoid this ambiguity, it is a good practice to always precede with a semicolon statements that start with a parenthesis:
+```
+include "helpers.fh";
+```
 
-     ;(print or io.write)('done')
-A block can be explicitly delimited to produce a single statement:
+`include` pulls another `.fh` file's top-level declarations into the
+current file at compile time; see `src/input.c` for the include and
+`.fhpack` (packaged/tar'd script bundle) machinery.
 
-	stat ::= do block end
-Explicit blocks are useful to control the scope of variable declarations. Explicit blocks are also sometimes used to add a return statement in the middle of another block (see §3.3.4).
+---
+
+## 2. Standard library reference
+
+Everything below is a global function, callable directly from any script
+— there are no namespaces/modules, just naming conventions (`string_*`,
+`math_*`, `io_*`, `os_*`, `json_*`). Parameter types are as accepted by
+the C implementation in `src/c_funcs.c`; passing the wrong type raises a
+script error rather than crashing (per `CLAUDE.md`'s binding-safety rules
+for anyone extending this file).
+
+### 2.1 Language intrinsics (not in the `fh_std_c_funcs` table)
+
+These two are special-cased by the compiler (`src/compiler.c`) into
+dedicated bytecode instructions, rather than being ordinary C functions —
+that also means they can't be reassigned or passed around like other
+built-ins.
+
+| Function | Description |
+|---|---|
+| `len(x)` | Returns the length of an array, map or string as an integer. Errors if `x` isn't one of those. |
+| `append(arr, val)` | Appends `val` to the end of array `arr` in place, and returns `arr`. Errors if `arr` isn't an array. |
+
+```
+let a = [1, 2];
+append(a, 3);      # a is now [1, 2, 3]
+len(a);              # 3
+len("hello");        # 5
+```
+
+### 2.2 Core / misc
+
+| Function | Description |
+|---|---|
+| `type(x)` | Returns the type of `x` as a string (`"null"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"array"`, `"map"`, `"closure"`, `"c_func"`, `"c_obj"`, ...). |
+| `tostring(x)` | Converts a number (int or float) to its string representation. |
+| `tonumber(s)` | Parses string `s` as a float; returns `null` if it isn't a valid number. |
+| `tointeger(x)` | Converts a number to an integer (truncating a float). |
+| `has(container, value)` | Searches an array or map for `value` (O(n)). Returns `[found_value, index]` if found, `false` otherwise. |
+| `contains_key(map, key)` | Returns `true`/`false` for whether `key` exists in `map`. |
+| `next_key(map, key)` | Returns the map key that follows `key` in iteration order; pass `null` to get the first key. Used to iterate a map without `for-in`. |
+| `delete(container, key_or_index)` | Removes an entry from an array (by index) or map (by key) and returns the removed value. |
+| `reset(container)` | Empties an array or map in place (keeps the underlying allocation, avoiding a realloc on reuse). |
+| `reserve(container, capacity)` | Pre-allocates capacity in an array or map and returns it. |
+| `docstring(fn)` | Returns the docstring of a closure (`fn f() : "doc" {}`), or `""` if it has none. Only works on closures. |
+| `getversion()` | Returns the FH version string (e.g. `"1.0.rc6"`). |
+| `error(msg)` | Aborts the script with error message `msg` (string). |
+| `assert(cond[, msg])` | Raises an error if `cond` is falsy; `msg` is included in the error if given. |
+| `print(...)` | Prints any number of values with no separators or trailing newline. |
+| `println(...)` | Like `print`, but appends the caller's source location and a newline. |
+| `printf(fmt, ...)` | C-style formatted print to stdout. Specifiers: `%d`/`%u`/`%x` (integer), `%f`/`%g` (float), `%s` (any value), `%%` (literal `%`). Unlike `string_format`, `%d`/`%u`/`%x` require an integer argument and `%f`/`%g` require a float — passing the wrong numeric subtype is a script error. |
+| `eval(code, fn_name)` | Compiles `code` (a string of FH source) in a fresh, sandboxed sub-program and calls its function `fn_name` with no arguments, returning its result. No values are passed from the calling program into the sandboxed code. |
+
+```
+let m = {"a": 1, "b": 2};
+let k = next_key(m, null);
+while (k != null) {
+    printf("%s -> ", k);
+    k = next_key(m, k);
+}
+```
+
+### 2.3 String functions (`string_*`)
+
+| Function | Description |
+|---|---|
+| `string_slice(s, start[, end])` | Cuts `s` around `start` (and optionally `end`). With 2 args returns `[s[0:start], s[start:]]`; with 3 args returns `[s[0:start], s[start:end], s[end:]]`. |
+| `string_split(s, delimiters)` | Splits `s` on any of the characters in `delimiters` (like C's `strtok`), returns an array of strings. Max 1024 pieces. |
+| `string_upper(s)` / `string_lower(s)` | Returns an upper/lower-cased copy of `s`. |
+| `string_find(s, needle)` | Returns the byte index of the first occurrence of `needle` in `s`, or `-1` if not found. |
+| `string_match(s, pattern)` | Matches `s` against a regex `pattern` (see `src/regex/re.c`); returns the match index, or `null` if no match. |
+| `string_reverse(s)` | Returns `s` reversed. |
+| `string_substr(s, start, len)` | Returns the `len`-byte substring of `s` starting at byte `start`. |
+| `string_char(x)` | A digit ⇄ character helper, **not general character indexing**: if `x` is a string, returns the integer value of its first character treated as an ASCII digit (`ord(x[0]) - ord('0')`); if `x` is an integer `0-9`, returns the 1-character string for that digit. |
+| `string_trim(s)` | Returns `s` with leading/trailing whitespace removed. |
+| `string_format(fmt, ...)` | Like `printf` but returns a string instead of printing. Specifiers: `%d`/`%u`/`%x` (integer), `%f`/`%g` (float), `%s`/`%c` (string), `%%`. |
+| `string_join(sep, s1, s2, ...)` | Joins two or more strings with separator `sep` between them. |
+
+```
+string_split("a,b,c", ",");            # ["a", "b", "c"]
+string_format("%s is %d", "x", 5);      # "x is 5"
+string_slice("hello world", 5);          # ["hello", " world"]
+```
+
+### 2.4 Math functions (`math_*`)
+
+Trigonometric/exponential functions take and return floats.
+
+| Function | Description |
+|---|---|
+| `math_abs(x)` | Absolute value; preserves int vs float. |
+| `math_ceil(x)` / `math_floor(x)` | Rounds up/down; integers pass through unchanged. |
+| `math_clamp(x, min, max)` | Clamps `x` to `[min, max]`. |
+| `math_max(a, b)` / `math_min(a, b)` | Larger/smaller of two numbers. |
+| `math_pow(x, y)` | `x` raised to the power `y`. |
+| `math_sqrt(x)` | Square root. |
+| `math_exp(x)` / `math_log(x)` / `math_log10(x)` | `e^x`, natural log, base-10 log. |
+| `math_sin(x)` / `math_cos(x)` / `math_tan(x)` | Trigonometric functions (radians). |
+| `math_sinh(x)` / `math_cosh(x)` / `math_tanh(x)` | Hyperbolic variants. |
+| `math_asin(x)` / `math_acos(x)` / `math_atan(x)` / `math_atan2(y, x)` | Inverse trig functions. |
+| `math_deg(x)` / `math_rad(x)` | Radians ⇄ degrees conversion. |
+| `math_fmod(x, y)` | Floating-point remainder of `x / y`. |
+| `math_modf(x)` | Splits `x` into `[integer_part, fractional_part]`. |
+| `math_frexp(x)` | Splits `x` into `[exponent, mantissa]` (see C's `frexp`). |
+| `math_ldexp(x, n)` | `x * 2^n`. |
+| `math_pi()` | Returns π. |
+| `math_flt_epsilon()` | Returns `FLT_EPSILON`. |
+| `math_maxval()` | Returns `DBL_MAX`. |
+| `math_random()` | With no arguments, a float in `[0, 1)`. |
+| `math_random(n)` | An integer in `[1, n]`. |
+| `math_random(min, max)` | An integer in `[min, max]`. |
+| `math_randomseed([seed])` | Seeds the RNG (Mersenne Twister); uses the current time if `seed` is omitted. |
+
+```
+math_clamp(150, 0, 100);   # 100
+math_random(1, 6);          # simulate a die roll
+```
+
+### 2.5 Crypto (namespaced under `math_*`)
+
+These live under the `math_` prefix in the C source and the global
+namespace — there is no separate `crypto_*` prefix, despite crypto being
+its own conceptual category.
+
+| Function | Description |
+|---|---|
+| `math_md5(s)` | Returns the MD5 hash of string `s` as a 32-character lowercase hex string. |
+| `math_bcrypt_gen_salt(cost)` | Generates a bcrypt salt; `cost` (work factor) must be between 4 and 31. |
+| `math_bcrypt_hashpw(password, salt)` | Hashes `password` with `salt` (from `math_bcrypt_gen_salt`, or an existing bcrypt hash to verify against). Returns the bcrypt hash string. |
+
+```
+let salt = math_bcrypt_gen_salt(12);
+let hash = math_bcrypt_hashpw("hunter2", salt);
+# ... later, to verify a login attempt:
+let ok = (math_bcrypt_hashpw(attempt, hash) == hash);
+```
+
+### 2.6 I/O functions (`io_*`)
+
+File I/O:
+
+| Function | Description |
+|---|---|
+| `io_open(path[, mode])` | Opens a file (`mode` defaults to `"r"`, same modes as C `fopen`). Returns an opaque IO handle (`c_obj`). |
+| `io_read()` | With no arguments, reads a line from stdin. |
+| `io_read(handle)` | Reads the entire contents of an open file handle as a string. |
+| `io_scan_line()` | Reads a single line from stdin (without the arbitrary-length growth semantics of `io_read()`). |
+| `io_write(handle, value)` | Writes `value` (null/bool/number/string) to an open file handle. |
+| `io_seek(handle, offset, whence)` | Seeks in an open file; `whence` is `"set"`, `"cur"` or `"end"`. |
+| `io_close(handle)` | Closes an open file handle. |
+| `io_rename(old, new)` | Renames a file. |
+| `io_remove(path)` | Deletes a file. |
+| `io_mkdir(path)` | Creates a directory. |
+| `io_filetype(path)` | Returns `"file"`, `"directory"`, `"unknown"`, or `null` if `path` doesn't exist. |
+
+TAR archive I/O (also used for FH's own `.fhpack` package format):
+
+| Function | Description |
+|---|---|
+| `io_tar_open(path[, mode])` | Opens a tar archive (`mode` defaults to `"r"`). Returns an opaque tar handle. |
+| `io_tar_read(handle, filename)` | Reads a file's contents out of an open tar archive. |
+| `io_tar_list(handle)` | Returns an array of file names in the tar archive. |
+| `io_tar_write_header(handle, filename, size)` | Writes a file header for the next entry (archive must be opened for writing). |
+| `io_tar_write_data(handle, data)` | Writes `data` for the entry started by `io_tar_write_header`. |
+| `io_tar_write_finalize(handle)` | Finalizes the archive (writes the terminating records). |
+| `io_tar_close(handle)` | Closes the tar handle. |
+
+### 2.7 OS / system functions (`os_*`)
+
+| Function | Description |
+|---|---|
+| `os_time()` | Returns an opaque high-resolution timestamp object (`c_obj`), for use with `os_difftime`. |
+| `os_difftime(t0, t1)` | Returns the number of microseconds between two `os_time()` objects. |
+| `os_localtime()` | Returns the current local time as a human-readable string (C's `asctime`). |
+| `os_command(cmd)` | Runs `cmd` through the system shell; returns `true` if it exited with status 0. |
+| `os_getenv(name)` | Returns the value of environment variable `name`, or `null` if unset. |
+| `os_getOS()` | Returns the host OS name: `"linux"`, `"macOS"`, `"windows"` or `"bsd"`. |
+
+### 2.8 JSON (`json_*`)
+
+| Function | Description |
+|---|---|
+| `json_parse(s)` | Parses a JSON string into FH values (objects → maps, arrays → arrays, numbers → int or float as appropriate). |
+| `json_stringify(v)` | Serializes an FH value (null/bool/number/string/array/map) to a compact JSON string. |
+
+```
+let data = json_parse('{"name": "John", "scores": [95, 87]}');
+data["name"];                 # "John"
+data["scores"][0];             # 95
+json_stringify({"a": 1, "b": true});   # '{"a":1,"b":true}'
+```
+
+### 2.9 Garbage collector (`gc*`)
+
+| Function | Description |
+|---|---|
+| `gc()` | Forces an immediate garbage collection. |
+| `gc_info()` | Returns the number of bytes currently allocated. |
+| `gc_pause(bool)` | Pauses (`true`) or resumes (`false`) automatic collection. |
+| `gc_frequency(bytes)` | Sets the allocation threshold (bytes, `>= 1000000`) that triggers an automatic collection. |
+
+---
+
+## See also
+
+- [`README.md`](../README.md) — build/run instructions, embedding pointer,
+  full example programs (closures, Mandelbrot, Fibonacci).
+- [`src/fh.h`](../src/fh.h) — the public C embedding API.
+- `tests/test_*.fh` — runnable examples of nearly everything documented
+  above; `./run_tests.sh` runs them all.
