@@ -776,7 +776,25 @@ int fh_run_vm(struct fh_vm *vm) {
         [OPC_FORLOOP] = &&op_FORLOOP,
     };
 
+// C functions (and a few inline VM helpers, e.g. string concatenation)
+// anchor any string/array/map they create in prog->c_vals so it survives
+// a nested GC while it's still being built (see fh_new_string/
+// fh_new_array/fh_new_map). That anchor is only needed for the duration
+// of the single bytecode instruction that created it: by the time we're
+// back here to fetch the next instruction, any value worth keeping has
+// already been written into a VM register (itself a GC root), so it's
+// safe - and necessary, to avoid growing this vector for the life of the
+// program - to release every temp anchor added since the last dispatch.
+#define CLEAR_C_VALS() do { \
+        if (vm->prog->c_vals.length) { \
+            for (size_t _cv_i = 0; _cv_i < vm->prog->c_vals.length; _cv_i++) \
+                free(vm->prog->c_vals.data[_cv_i]); \
+            vm->prog->c_vals.length = 0; \
+        } \
+    } while (0)
+
 #define DISPATCH() do { \
+        CLEAR_C_VALS(); \
         uint32_t instr__ = *pc++; \
         op   = GET_INSTR_OP(instr__); \
         ra_i = GET_INSTR_RA(instr__); \
