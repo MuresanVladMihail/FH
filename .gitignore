@@ -6,12 +6,25 @@
 *.ko
 *.obj
 *.elf
-./fh
+/fh
+/fh_optimized
 
 # Linker output
 *.ilk
 *.map
 *.exp
+
+# Coverage / profiling output
+*.profraw
+*.profdata
+*.gcda
+*.gcno
+*.gcov
+
+# Vim swap files
+*.swp
+*.swo
+*.swn
 
 # Precompiled Headers
 *.gch
