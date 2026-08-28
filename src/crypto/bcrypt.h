@@ -5,7 +5,6 @@
 
 #include "mt19937.h"
 
-mt19937_state mt19937state;
 void bcrypt_init(void);
 
 /*

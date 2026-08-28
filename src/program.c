@@ -8,6 +8,17 @@
 #include "pool.h"
 #include "fh.h"
 
+mt19937_state *mt19937_generator;
+vec_void_t *fh_programs_vector;
+bool fh_dump_doc;
+bool fh_running;
+bool fh_is_packed;
+bool fh_started_pack;
+char *fh_main_file_packed;
+mtar_t fh_tar;
+mtar_header_t fh_tar_header;
+vec_void_t fh_dynamic_libraries;
+
 void fh_init(void) {
     fh_programs_vector = malloc(sizeof(vec_void_t));
     vec_init(fh_programs_vector);

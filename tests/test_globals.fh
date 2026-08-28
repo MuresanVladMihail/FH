@@ -103,5 +103,6 @@ fn main() {
     test_cross_function();
     test_complex_modification();
 
-    print("\n=== All tests passed! ===");
+    print("\n=== All tests passed! ===\n");
+    print('ok\n');
 }

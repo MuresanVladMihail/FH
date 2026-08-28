@@ -6,4 +6,5 @@ fn main() {
     print("y = ", y);
     let z = x + 10;
     print("z = ", z);
+    print('\nok\n');
 }

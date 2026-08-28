@@ -2910,9 +2910,10 @@ static int eval_const_expr(struct fh_compiler *c, struct fh_p_expr *expr, struct
                 if (eval_const_expr(c, elem, &val) < 0) {
                     return fh_compiler_error(c, elem->loc, "array initializer must be constant expression");
                 }
-                if (fh_grow_array_object(c->prog, arr, arr->len + 1) < 0)
+                struct fh_value *slot = fh_grow_array_object(c->prog, arr, 1);
+                if (!slot)
                     return -1;
-                arr->items[arr->len++] = val;
+                *slot = val;
                 elem = elem->next;
             }
 
