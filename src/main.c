@@ -6,8 +6,6 @@
 #include "fh.h"
 #include "program.h"
 
-#include "functions.h"
-
 int fh_run_string(struct fh_program *prog, bool dump_bytecode, const char *string, const char *main_function_name) {
     char *template = "fb main(){%s;}";
     char *code = malloc(strlen(template) - 2 + strlen(string) + 1);

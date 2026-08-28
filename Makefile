@@ -29,7 +29,7 @@ ifeq ($(OS), Windows_NT)
 	CC = x86_64-w64-mingw32-gcc
 endif 
 
-OBJS = src/main.o src/functions.o
+OBJS = src/main.o
 OBJS += src/crypto/bcrypt.o src/crypto/mt19937.o src/crypto/mt19937-jump.o src/crypto/md5.o \
 		src/tar/microtar.o src/regex/re.o src/vec/vec.o src/map/map.o src/util.o src/input.o src/buffer.o src/stack.o src/symtab.o \
 		src/operator.o src/tokenizer.o src/parser.o src/ast.o src/dump_ast.o \
