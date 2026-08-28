@@ -2592,7 +2592,12 @@ static int fn_eval(struct fh_program *prog, struct fh_value *ret, struct fh_valu
     }
 
     struct fh_program *p = fh_new_program();
+    if (!p) {
+        fh_close_input(in);
+        return fh_set_error(prog, "eval(): out of memory");
+    }
     if (fh_compile_input(p, in) < 0) {
+        fh_free_program(p);
         return fh_set_error(prog, "Couldn't compile input string: %s",
                             code);
     }
@@ -2602,6 +2607,7 @@ static int fn_eval(struct fh_program *prog, struct fh_value *ret, struct fh_valu
      * because this could expose security breaches!
      */
     if (fh_call_function(p, fn_name, NULL, 0, ret) < 0) {
+        fh_free_program(p);
         return fh_set_error(prog, "Couldn't call function %s\n", fn_name);
     }
 

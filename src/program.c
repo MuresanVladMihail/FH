@@ -417,22 +417,23 @@ int fh_compile_input(struct fh_program *prog, struct fh_input *in) {
         return -1;
     }
     if (fh_parse(&prog->parser, ast, in) < 0) {
-        goto err;
+        // fh_parse() has already taken ownership of `in` via the parser's
+        // tokenizer chain (see new_input() in parser.c), which will close
+        // it when the parser is reset/destroyed. Closing it again here
+        // would be a double free.
+        fh_free_ast(ast);
+        return -1;
     }
 
     // fh_dump_ast(ast);
 
     if (fh_compile(&prog->compiler, ast) < 0) {
-        goto err;
+        fh_free_ast(ast);
+        return -1;
     }
 
     fh_free_ast(ast);
     return 0;
-
-err:
-    fh_free_ast(ast);
-    fh_close_input(in);
-    return -1;
 }
 
 int fh_compile_pack(struct fh_program *prog, const char *path, bool is_mandatory) {
