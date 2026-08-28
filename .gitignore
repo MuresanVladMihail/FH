@@ -1,6 +1,9 @@
 # Prerequisites
 *.d
 
+# Tracks the last-used `make TARGETS=...` config (see Makefile)
+.last_targets
+
 # Object files
 *.o
 *.ko

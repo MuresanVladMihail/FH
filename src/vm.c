@@ -538,6 +538,7 @@ static struct fh_upval *find_or_add_upval(struct fh_vm *vm, struct fh_value *val
         cur = &(*cur)->data.next;
     }
     struct fh_upval *uv = fh_make_upval(vm->prog, false);
+    if (!uv) return NULL;
     uv->val = val;
     uv->data.next = *cur;
     *cur = uv;
@@ -1058,6 +1059,7 @@ op_CLOSURE: {
                 c->upvals[i] = frame->closure->upvals[func_def->upvals[i].num];
             } else {
                 c->upvals[i] = find_or_add_upval(vm, &reg_base[func_def->upvals[i].num]);
+                if (!c->upvals[i]) goto err;
                 GC_PIN_OBJ(c->upvals[i]);
             }
         }

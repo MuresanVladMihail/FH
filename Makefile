@@ -43,6 +43,18 @@ CHECK_SCRIPT = tests/test.fh
 # Note: leave no spaces behind or after the equal sign below
 TARGETS =release
 
+# Object files don't encode which TARGETS config they were built with, so
+# switching configs (e.g. `make` then `make TARGETS=debug`) without an
+# intervening `make clean` would otherwise silently link together objects
+# built with different flags, producing a broken binary. Track the last
+# used TARGETS in a stamp file and force a full rebuild when it changes.
+LAST_TARGETS_FILE := .last_targets
+LAST_TARGETS := $(shell cat $(LAST_TARGETS_FILE) 2>/dev/null)
+ifneq ($(TARGETS),$(LAST_TARGETS))
+$(shell touch $(SRCS) 2>/dev/null)
+$(shell echo $(TARGETS) > $(LAST_TARGETS_FILE))
+endif
+
 ifeq ($(TARGETS), debug_dev)
 	CFLAGS += $(DEBUG_DEV_CFLAGS)
 endif
