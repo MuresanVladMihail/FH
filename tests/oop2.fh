@@ -1,6 +1,21 @@
 #-
 This example shows how you can extend one 'class' to another.
+
+Note: 'extends' is not a built-in FH function -- it doesn't exist anywhere
+in the standard library. This is a small FH-level helper that copies every
+key/value pair from 'source' onto 'target' (a manual, map-based mixin/
+prototype copy), built entirely out of real built-ins (next_key, map
+indexing).
 -#
+fn extends(target, source) {
+    let k = next_key(source, null);
+    while (k != null) {
+        target[k] = source[k];
+        k = next_key(source, k);
+    }
+    return target;
+}
+
 fn entityClass() {
     let self = {};
     self.a = 123;
@@ -54,5 +69,5 @@ fn main() {
     assert(dog.getSelf().name == dog.getName());
     assert(dog.getSelf().a == dog.getA());
 
-    println('mem usage: ' + gcinfo()/1000 + ' KB');
+    println('mem usage: ' + gc_info()/1000 + ' KB');
 }

@@ -10,7 +10,6 @@
 #include "parser.h"
 #include "ast.h"
 #include "parser_stacks.h"
-#include "util.h"
 
 
 static struct fh_p_stmt_block *parse_block(struct fh_parser *p, struct fh_token *tok,
@@ -1441,11 +1440,13 @@ static int new_input(struct fh_parser *p, struct fh_src_loc loc, struct fh_input
     fh_symbol_id file_id = fh_add_ast_file_name(p->ast, fh_get_input_filename(in));
     if (file_id < 0) {
         fh_parse_error_oom(p, loc);
+        fh_close_input(in);
         return -1;
     }
     struct fh_tokenizer *t = fh_new_tokenizer(p->prog, in, p->ast, &p->tmp_buf, (uint16_t) file_id);
     if (!t) {
         fh_parse_error(p, loc, "can't create tokenizer for '%s'", fh_get_input_filename(in));
+        fh_close_input(in);
         return -1;
     }
     t->next = p->tokenizer;

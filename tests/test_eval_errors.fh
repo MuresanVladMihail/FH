@@ -1,0 +1,26 @@
+# Regression test: eval() must report a clean script error (not crash,
+# not double-free) when the sub-program it creates fails to compile or
+# fails to find the requested function, and must still work normally
+# afterwards for a script that doesn't hit those paths.
+#
+# Note: an eval() failure raises a normal FH runtime error (like any
+# fh_set_error()), which unwinds the whole script - so a failing eval()
+# can't be retried in a loop within a single run. This file covers the
+# success path end-to-end (regression-testing that fn_eval's cleanup
+# changes didn't break normal use); the two error paths (bad syntax,
+# missing function) were verified manually to exit cleanly with a
+# script-level error instead of crashing or double-freeing.
+
+fn main() {
+    let a = eval("fn ok_func_1() { return 41 + 1; }", "ok_func_1");
+    assert(a == 42);
+
+    gc();
+
+    let b = eval("fn ok_func_2() { return [1, 2, 3]; }", "ok_func_2");
+    assert(len(b) == 3);
+
+    gc();
+
+    print('ok\n');
+}

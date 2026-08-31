@@ -8,6 +8,17 @@
 #include "pool.h"
 #include "fh.h"
 
+mt19937_state *mt19937_generator;
+vec_void_t *fh_programs_vector;
+bool fh_dump_doc;
+bool fh_running;
+bool fh_is_packed;
+bool fh_started_pack;
+char *fh_main_file_packed;
+mtar_t fh_tar;
+mtar_header_t fh_tar_header;
+vec_void_t fh_dynamic_libraries;
+
 void fh_init(void) {
     fh_programs_vector = malloc(sizeof(vec_void_t));
     vec_init(fh_programs_vector);
@@ -406,22 +417,23 @@ int fh_compile_input(struct fh_program *prog, struct fh_input *in) {
         return -1;
     }
     if (fh_parse(&prog->parser, ast, in) < 0) {
-        goto err;
+        // fh_parse() has already taken ownership of `in` via the parser's
+        // tokenizer chain (see new_input() in parser.c), which will close
+        // it when the parser is reset/destroyed. Closing it again here
+        // would be a double free.
+        fh_free_ast(ast);
+        return -1;
     }
 
     // fh_dump_ast(ast);
 
     if (fh_compile(&prog->compiler, ast) < 0) {
-        goto err;
+        fh_free_ast(ast);
+        return -1;
     }
 
     fh_free_ast(ast);
     return 0;
-
-err:
-    fh_free_ast(ast);
-    fh_close_input(in);
-    return -1;
 }
 
 int fh_compile_pack(struct fh_program *prog, const char *path, bool is_mandatory) {

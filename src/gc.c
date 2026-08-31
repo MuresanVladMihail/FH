@@ -297,6 +297,14 @@ static void mark_roots(struct fh_gc_state *gc, struct fh_program *prog) {
         MARK_OBJECT(gc, *pc);
     }
 
+    // mark global variables
+    debug_log("***** marking global variables\n");
+    map_iter_t var_iter = map_iter(&prog->global_vars_map);
+    while ((key = map_next(&prog->global_vars_map, &var_iter))) {
+        struct fh_value **pv = (struct fh_value **) map_get(&prog->global_vars_map, key);
+        MARK_VALUE(gc, *pv);
+    }
+
     // mark stack
     struct fh_vm_call_frame *cur_frame = call_frame_stack_top(&prog->vm.call_stack);
     if (cur_frame) {

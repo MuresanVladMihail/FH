@@ -1,3 +1,20 @@
+#-
+'extends' is not a built-in FH function -- it doesn't exist anywhere in the
+standard library. This is a small FH-level helper that copies every
+key/value pair from 'source' onto 'target' (a manual, map-based mixin/
+prototype copy), built entirely out of real built-ins (next_key, map
+indexing). It's what these examples use to demonstrate "inheritance"
+between plain maps.
+-#
+fn extends(target, source) {
+    let k = next_key(source, null);
+    while (k != null) {
+        target[k] = source[k];
+        k = next_key(source, k);
+    }
+    return target;
+}
+
 fn classHero(  name, age, level  ) {
 
     let self = {};

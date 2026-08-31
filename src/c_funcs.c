@@ -567,18 +567,23 @@ static int fn_math_frexp(struct fh_program *prog, struct fh_value *ret, struct f
 
     int pin_state = fh_get_pin_state(prog);
     struct fh_array *arr = fh_make_array(prog, true);
+    if (!arr) {
+        fh_restore_pin_state(prog, pin_state);
+        return fh_set_error(prog, "out of memory");
+    }
     const struct fh_value fp = fh_new_float(fract_part);
     const struct fh_value ip = fh_make_float(e);
 
     struct fh_value *new_items = fh_grow_array_object(prog, arr, 2);
-    if (!new_items)
+    if (!new_items) {
+        fh_restore_pin_state(prog, pin_state);
         return fh_set_error(prog, "out of memory");
+    }
 
     arr->items[1] = fp;
     arr->items[0] = ip;
 
-    struct fh_value v = fh_new_array(prog);
-    v.data.obj = arr;
+    struct fh_value v = { .type = FH_VAL_ARRAY, .data = { .obj = (union fh_object *) arr } };
 
     *ret = v;
     fh_restore_pin_state(prog, pin_state);
@@ -586,8 +591,10 @@ static int fn_math_frexp(struct fh_program *prog, struct fh_value *ret, struct f
 }
 
 static int fn_math_huge(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    UNUSED(prog);
     UNUSED(args);
-    *ret = fh_make_integer(HUGE_VAL);
+    UNUSED(n_args);
+    *ret = fh_make_float(HUGE_VAL);
     return 0;
 }
 
@@ -664,18 +671,23 @@ static int fn_math_modf(struct fh_program *prog, struct fh_value *ret, struct fh
 
     int pin_state = fh_get_pin_state(prog);
     struct fh_array *arr = fh_make_array(prog, true);
+    if (!arr) {
+        fh_restore_pin_state(prog, pin_state);
+        return fh_set_error(prog, "out of memory");
+    }
     const struct fh_value fp = fh_new_float(fract_part);
     const struct fh_value ip = fh_make_float(int_part);
 
     struct fh_value *new_items = fh_grow_array_object(prog, arr, 2);
-    if (!new_items)
+    if (!new_items) {
+        fh_restore_pin_state(prog, pin_state);
         return fh_set_error(prog, "out of memory");
+    }
 
     arr->items[1] = fp;
     arr->items[0] = ip;
 
-    struct fh_value v = fh_new_array(prog);
-    v.data.obj = arr;
+    struct fh_value v = { .type = FH_VAL_ARRAY, .data = { .obj = (union fh_object *) arr } };
 
     *ret = v;
     fh_restore_pin_state(prog, pin_state);
@@ -836,6 +848,13 @@ static int fn_math_maxval(struct fh_program *prog, struct fh_value *ret, struct 
 
 /*********** I/O functions ***********/
 
+static void io_tar_gc_callback(void *data) {
+    if (data) {
+        mtar_close((mtar_t *) data);
+        free(data);
+    }
+}
+
 static int fn_io_tar_open(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
     if (n_args < 1 || n_args > 2) {
         return fh_set_error(prog, "io_tar_open(): expected 1 or 2 arguments, got %d", n_args);
@@ -854,7 +873,7 @@ static int fn_io_tar_open(struct fh_program *prog, struct fh_value *ret, struct 
         return fh_set_error(prog, "Couldn't open tar file at location: %s", path);
     }
 
-    *ret = fh_new_c_obj(prog, tar, NULL, FH_IO_TAR_STRUCT_ID);
+    *ret = fh_new_c_obj(prog, tar, io_tar_gc_callback, FH_IO_TAR_STRUCT_ID);
     return 0;
 }
 
@@ -870,6 +889,7 @@ static int fn_io_tar_read(struct fh_program *prog, struct fh_value *ret, struct 
     }
 
     mtar_t *tar = fh_get_c_obj_value(&args[0]);
+    if (!tar) return fh_set_error(prog, "io_tar_read(): tar handle is closed");
     const char *file = fh_get_string(&args[1]);
 
     mtar_header_t h;
@@ -902,10 +922,12 @@ static int fn_io_tar_list(struct fh_program *prog, struct fh_value *ret, struct 
         return fh_set_error(prog, "Expected tar object as first argument");
     }
 
+    mtar_t *tar = fh_get_c_obj_value(&args[0]);
+    if (!tar) return fh_set_error(prog, "io_tar_list(): tar handle is closed");
+
     struct fh_value arr = fh_new_array(prog);
     const struct fh_array *arr_val = GET_VAL_ARRAY(&arr);
 
-    mtar_t *tar = fh_get_c_obj_value(&args[0]);
     mtar_header_t h;
 
     size_t len = 0;
@@ -932,6 +954,7 @@ static int fn_io_tar_write_header(struct fh_program *prog, struct fh_value *ret,
     if (size32 < 0) return fh_set_error(prog, "io_tar_write_header(): size must be >= 0");
 
     mtar_t *tar = fh_get_c_obj_value(&args[0]);
+    if (!tar) return fh_set_error(prog, "io_tar_write_header(): tar handle is closed");
     const char *file_name = fh_get_string(&args[1]);
 
     int err = mtar_write_file_header(tar, file_name, (unsigned) size32);
@@ -948,6 +971,7 @@ static int fn_io_tar_write_data(struct fh_program *prog, struct fh_value *ret, s
         return fh_set_error(prog, "Expected string (data) as second argument");
 
     mtar_t *tar = fh_get_c_obj_value(&args[0]);
+    if (!tar) return fh_set_error(prog, "io_tar_write_data(): tar handle is closed");
     const char *data = fh_get_string(&args[1]);
     const size_t len = strlen(data);
 
@@ -966,6 +990,7 @@ static int fn_io_tar_write_finalize(struct fh_program *prog, struct fh_value *re
     }
 
     mtar_t *tar = fh_get_c_obj_value(&args[0]);
+    if (!tar) return fh_set_error(prog, "io_tar_write_finalize(): tar handle is closed");
     mtar_finalize(tar);
     *ret = fh_new_null();
     return 0;
@@ -976,11 +1001,18 @@ static int fn_io_tar_close(struct fh_program *prog, struct fh_value *ret, struct
     if (!fh_is_c_obj_of_type(&args[0], FH_IO_TAR_STRUCT_ID)) {
         return fh_set_error(prog, "Expected tar object as first argument");
     }
-    mtar_t *tar = fh_get_c_obj_value(&args[0]);
+    struct fh_c_obj *h = fh_get_c_obj(&args[0]);
+    mtar_t *tar = h->ptr;
+    if (!tar) return fh_set_error(prog, "io_tar_close(): tar handle is already closed");
     mtar_close(tar);
     free(tar);
+    h->ptr = NULL;
     *ret = fh_new_null();
     return 0;
+}
+
+static void io_file_gc_callback(void *data) {
+    if (data) fclose((FILE *) data);
 }
 
 static int fn_io_open(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
@@ -1006,7 +1038,7 @@ static int fn_io_open(struct fh_program *prog, struct fh_value *ret, struct fh_v
         return fh_set_error(prog, "io_open(): failed to open file: %s", path);
     }
 
-    *ret = fh_new_c_obj(prog, fp, NULL, FH_IO_STRUCT_ID);
+    *ret = fh_new_c_obj(prog, fp, io_file_gc_callback, FH_IO_STRUCT_ID);
     return 0;
 }
 
@@ -1193,9 +1225,12 @@ static int fn_io_close(struct fh_program *prog, struct fh_value *ret, struct fh_
     if (!fh_is_c_obj(&args[0]) || fh_get_c_obj(&args[0])->type != FH_IO_STRUCT_ID)
         return fh_set_error(prog, "Expected IO handler");
 
-    FILE *fp = fh_get_c_obj_value(&args[0]);
+    struct fh_c_obj *h = fh_get_c_obj(&args[0]);
+    FILE *fp = h->ptr;
+    if (!fp) return fh_set_error(prog, "io_close(): IO handler is already closed");
 
     const int close = fclose(fp);
+    h->ptr = NULL;
     *ret = fh_new_bool(close == 0 ? true : false);
 
     return 0;
@@ -1210,6 +1245,7 @@ static int fn_io_seek(struct fh_program *prog, struct fh_value *ret, struct fh_v
         return fh_set_error(prog, "Expected IO handler");
 
     FILE *fp = fh_get_c_obj_value(&args[0]);
+    if (!fp) return fh_set_error(prog, "io_seek(): IO handler is closed");
     if (!fh_is_number(&args[1])) {
         return fh_set_error(prog, "expected number for the second argument, got: %s",
                             fh_type_to_str(prog, args[1].type));
@@ -1698,7 +1734,10 @@ static int cjson_to_fh_value(struct fh_program *prog, cJSON *json, struct fh_val
         return 0;
     }
     if (cJSON_IsArray(json)) {
-        struct fh_array *arr = fh_make_array(prog, false);
+        // Pinned: children are built by recursive calls that may themselves
+        // allocate (and thus trigger a nested GC) before this array is
+        // stored anywhere else reachable.
+        struct fh_array *arr = fh_make_array(prog, true);
         if (!arr) return -1;
 
         int size = cJSON_GetArraySize(json);
@@ -1718,7 +1757,8 @@ static int cjson_to_fh_value(struct fh_program *prog, cJSON *json, struct fh_val
         return 0;
     }
     if (cJSON_IsObject(json)) {
-        struct fh_map *map = fh_make_map(prog, false);
+        // Pinned for the same reason as the array case above.
+        struct fh_map *map = fh_make_map(prog, true);
         if (!map) return -1;
 
         cJSON *child = json->child;
@@ -1816,7 +1856,9 @@ static int fn_json_parse(struct fh_program *prog, struct fh_value *ret, struct f
         return fh_set_error(prog, "json_parse() failed to parse JSON");
     }
 
+    int pin_state = fh_get_pin_state(prog);
     int result = cjson_to_fh_value(prog, json, ret);
+    fh_restore_pin_state(prog, pin_state);
     cJSON_Delete(json);
 
     if (result < 0)
@@ -2100,7 +2142,6 @@ static int fn_tostring(struct fh_program *prog, struct fh_value *ret,
         return fh_set_error(prog, "tostring(): expected number/integer");
 
     if (fh_is_integer(&args[0])) {
-        printf("Converting integer to string\n");
         int needed = snprintf(NULL, 0, "%lld", (long long)args[0].data.i);
         char *buf = malloc((size_t) needed + 1);
         if (!buf) return fh_set_error(prog, "tostring(): out of memory");
@@ -2249,10 +2290,16 @@ static int fn_has(struct fh_program *prog, struct fh_value *ret, struct fh_value
 
     int pin_state = fh_get_pin_state(prog);
     struct fh_array *ret_arr = fh_make_array(prog, true);
-    if (!fh_grow_array_object(prog, ret_arr, 2))
+    if (!ret_arr) {
+        fh_restore_pin_state(prog, pin_state);
         return fh_set_error(prog, "out of memory");
+    }
+    if (!fh_grow_array_object(prog, ret_arr, 2)) {
+        fh_restore_pin_state(prog, pin_state);
+        return fh_set_error(prog, "out of memory");
+    }
 
-    struct fh_value new_val = fh_new_array(prog);
+    struct fh_value new_val = { .type = FH_VAL_ARRAY, .data = { .obj = (union fh_object *) ret_arr } };
 
     const struct fh_array *arr = GET_VAL_ARRAY(&args[0]);
     if (arr) {
@@ -2592,7 +2639,12 @@ static int fn_eval(struct fh_program *prog, struct fh_value *ret, struct fh_valu
     }
 
     struct fh_program *p = fh_new_program();
+    if (!p) {
+        fh_close_input(in);
+        return fh_set_error(prog, "eval(): out of memory");
+    }
     if (fh_compile_input(p, in) < 0) {
+        fh_free_program(p);
         return fh_set_error(prog, "Couldn't compile input string: %s",
                             code);
     }
@@ -2602,6 +2654,7 @@ static int fn_eval(struct fh_program *prog, struct fh_value *ret, struct fh_valu
      * because this could expose security breaches!
      */
     if (fh_call_function(p, fn_name, NULL, 0, ret) < 0) {
+        fh_free_program(p);
         return fh_set_error(prog, "Couldn't call function %s\n", fn_name);
     }
 

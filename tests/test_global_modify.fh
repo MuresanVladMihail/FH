@@ -8,4 +8,5 @@ fn main() {
     print("Before: ", x);
     modify();
     print("After: ", x);
+    print('\nok\n');
 }

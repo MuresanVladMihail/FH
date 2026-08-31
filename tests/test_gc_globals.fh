@@ -1,0 +1,41 @@
+# Regression test: global variables (string/array/map literals) must
+# survive garbage collection. The GC used to only mark
+# prog->global_funcs_map as a root, not prog->global_vars_map, so a
+# global initialized to a non-trivial literal could be collected out
+# from under the program the first time enough allocation happened to
+# trigger a real (not forced) collection.
+
+let g_str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+let g_arr = [1, 2, 3, 4, 5];
+let g_map = {"name": "FH", "version": 1};
+
+fn churn(n) {
+    # allocate enough garbage to force real GC activity, not just gc()
+    let base = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    let i = 0;
+    while (i < n) {
+        let s = base + i;
+        let a = [i, i + 1];
+        let m = {"x": i};
+        i = i + 1;
+    }
+}
+
+fn main() {
+    gc();
+    churn(2000);
+    gc();
+
+    assert(g_str == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    assert(len(g_arr) == 5 && g_arr[0] == 1 && g_arr[4] == 5);
+    assert(g_map["name"] == "FH" && g_map["version"] == 1);
+
+    churn(2000);
+    gc();
+
+    assert(g_str == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    assert(len(g_arr) == 5);
+    assert(g_map["name"] == "FH");
+
+    print('ok\n');
+}

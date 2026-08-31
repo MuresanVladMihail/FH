@@ -29,7 +29,7 @@ ifeq ($(OS), Windows_NT)
 	CC = x86_64-w64-mingw32-gcc
 endif 
 
-OBJS = src/main.o src/functions.o
+OBJS = src/main.o
 OBJS += src/crypto/bcrypt.o src/crypto/mt19937.o src/crypto/mt19937-jump.o src/crypto/md5.o \
 		src/tar/microtar.o src/regex/re.o src/vec/vec.o src/map/map.o src/util.o src/input.o src/buffer.o src/stack.o src/symtab.o \
 		src/operator.o src/tokenizer.o src/parser.o src/ast.o src/dump_ast.o \
@@ -42,6 +42,18 @@ CHECK_SCRIPT = tests/test.fh
 # Possible inputs: debug, debug_dev, debug2, release, debug_san and asan.
 # Note: leave no spaces behind or after the equal sign below
 TARGETS =release
+
+# Object files don't encode which TARGETS config they were built with, so
+# switching configs (e.g. `make` then `make TARGETS=debug`) without an
+# intervening `make clean` would otherwise silently link together objects
+# built with different flags, producing a broken binary. Track the last
+# used TARGETS in a stamp file and force a full rebuild when it changes.
+LAST_TARGETS_FILE := .last_targets
+LAST_TARGETS := $(shell cat $(LAST_TARGETS_FILE) 2>/dev/null)
+ifneq ($(TARGETS),$(LAST_TARGETS))
+$(shell touch $(SRCS) 2>/dev/null)
+$(shell echo $(TARGETS) > $(LAST_TARGETS_FILE))
+endif
 
 ifeq ($(TARGETS), debug_dev)
 	CFLAGS += $(DEBUG_DEV_CFLAGS)

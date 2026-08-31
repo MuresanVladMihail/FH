@@ -48,4 +48,5 @@ fn main() {
     print("\n=== Changing Types ===");
     score = "Game Over";  # Change from number to string!
     print("Score: ", score);
+    print('\nok\n');
 }

@@ -176,6 +176,14 @@ void fh_free_expr_children(struct fh_p_expr *expr) {
             return;
 
         case EXPR_FUNC:
+            // default_values (and params) point into the same allocation
+            // as `expr` itself (see parse_func() in parser.c) and are
+            // freed along with it below - but each non-NULL entry is its
+            // own separately-allocated expression tree that needs freeing.
+            for (int i = 0; i < expr->data.func.n_params; i++) {
+                if (expr->data.func.default_values && expr->data.func.default_values[i])
+                    fh_free_expr(expr->data.func.default_values[i]);
+            }
             fh_free_block(expr->data.func.body);
             return;
         case EXPR_POST_INC:
