@@ -1,0 +1,36 @@
+# json_stringify(value, [pretty]): the optional second argument switches from
+# the compact single line to cJSON's indented output. Both forms have to parse
+# back to the same document, and the one-argument call must keep behaving
+# exactly as it did before.
+
+fn main() {
+    let doc = {};
+    doc["version"] = 1;
+    doc["name"] = "scene";
+    doc["list"] = [1, 2, 3];
+
+    let compact = json_stringify(doc);
+    let pretty = json_stringify(doc, true);
+
+    # false is the default, so it must match the one-argument form
+    assert(json_stringify(doc, false) == compact);
+
+    # indented output is strictly longer and spans several lines
+    assert(len(pretty) > len(compact));
+    assert(string_find(compact, "\n") < 0);
+    assert(string_find(pretty, "\n") > 0);
+
+    # both forms round-trip to the same values
+    let a = json_parse(compact);
+    let b = json_parse(pretty);
+    assert(a["version"] == 1);
+    assert(b["version"] == 1);
+    assert(b["name"] == "scene");
+    assert(b["list"][2] == 3);
+
+    # scalars and arrays go through the same path
+    assert(json_stringify(42, true) == "42");
+    assert(json_parse(json_stringify([1, 2], true))[1] == 2);
+
+    print("ok\n");
+}
