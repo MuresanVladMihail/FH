@@ -2662,55 +2662,95 @@ static int compile_block(struct fh_compiler *c, struct fh_src_loc loc,
     return 0;
 }
 
-// Peephole optimization: remove redundant MOV instructions
+/*
+ * Peephole optimization: remove redundant MOV instructions.
+ *
+ * Jump offsets are already baked in by the time this runs, so an instruction
+ * cannot simply be dropped: every OPC_JMP that steps over the hole would then
+ * land one instruction too far. Deciding what to remove, remapping the jumps
+ * and only then compacting keeps the two in step.
+ */
 static void peephole_optimize(struct code_stack *code) {
     const int size = code_stack_size(code);
     if (size < 2) return;
 
     uint32_t *instrs = code_stack_data(code);
-    int write_idx = 0;
 
+    bool *removed = calloc((size_t) size, sizeof(bool));
+    /* one extra slot: a jump may target the address just past the last
+     * instruction, and that has to map to the new end */
+    int *new_addr = malloc(((size_t) size + 1) * sizeof(int));
+    if (!removed || !new_addr) {
+        /* skipping the pass is always safe; a half-applied one is not */
+        free(removed);
+        free(new_addr);
+        return;
+    }
+
+    /* --- 1. decide what goes ------------------------------------------ */
     for (int i = 0; i < size; i++) {
-        uint32_t instr = instrs[i];
-        enum fh_bc_opcode opc = GET_INSTR_OP(instr);
-        bool skip = false;
+        if (GET_INSTR_OP(instrs[i]) != OPC_MOV)
+            continue;
 
-        // Pattern 1: MOV Ra, Ra (move to self) → remove
-        if (opc == OPC_MOV) {
-            int ra = GET_INSTR_RA(instr);
-            int rb = GET_INSTR_RB(instr);
-            if (ra == rb) {
-                skip = true;  // Redundant, skip this instruction
-            }
+        const int ra = GET_INSTR_RA(instrs[i]);
+        const int rb = GET_INSTR_RB(instrs[i]);
+
+        /* MOV Ra, Ra -- a move to itself */
+        if (ra == rb) {
+            removed[i] = true;
+            continue;
         }
 
-        // Pattern 2: MOV Ra, Rb followed by MOV Rb, Ra → keep only first
-        if (!skip && i + 1 < size && opc == OPC_MOV) {
-            uint32_t next_instr = instrs[i + 1];
-            enum fh_bc_opcode next_opc = GET_INSTR_OP(next_instr);
-
-            if (next_opc == OPC_MOV) {
-                int ra = GET_INSTR_RA(instr);
-                int rb = GET_INSTR_RB(instr);
-                int next_ra = GET_INSTR_RA(next_instr);
-                int next_rb = GET_INSTR_RB(next_instr);
-
-                // MOV Ra, Rb; MOV Rb, Ra → just keep first
-                if (ra == next_rb && rb == next_ra) {
-                    instrs[write_idx++] = instr;
-                    i++;  // Skip next instruction
-                    continue;
-                }
-            }
-        }
-
-        if (!skip) {
-            instrs[write_idx++] = instr;
+        /* MOV Ra, Rb followed by MOV Rb, Ra -- the second undoes nothing */
+        if (i + 1 < size && GET_INSTR_OP(instrs[i + 1]) == OPC_MOV &&
+            ra == GET_INSTR_RB(instrs[i + 1]) && rb == GET_INSTR_RA(instrs[i + 1])) {
+            removed[i + 1] = true;
+            i++;
         }
     }
 
-    // Update code stack size
+    /* --- 2. where every address ends up ------------------------------- */
+    int next = 0;
+    for (int i = 0; i < size; i++) {
+        /* a removed instruction maps to whatever follows it, which is what a
+         * jump that targeted it should now reach */
+        new_addr[i] = next;
+        if (!removed[i])
+            next++;
+    }
+    new_addr[size] = next;
+
+    if (next == size) {
+        /* nothing to do, and no jump needs touching */
+        free(removed);
+        free(new_addr);
+        return;
+    }
+
+    /* --- 3. rewrite the jumps while the old addresses still hold ------- */
+    for (int i = 0; i < size; i++) {
+        if (removed[i] || GET_INSTR_OP(instrs[i]) != OPC_JMP)
+            continue;
+
+        int target = i + 1 + GET_INSTR_RS(instrs[i]);
+        if (target < 0) target = 0;
+        if (target > size) target = size;
+
+        const int diff = new_addr[target] - new_addr[i] - 1;
+        instrs[i] &= ~INSTR_RS_MASK;
+        instrs[i] |= PLACE_INSTR_RS(diff);
+    }
+
+    /* --- 4. compact --------------------------------------------------- */
+    int write_idx = 0;
+    for (int i = 0; i < size; i++) {
+        if (!removed[i])
+            instrs[write_idx++] = instrs[i];
+    }
     code_stack_set_size(code, write_idx);
+
+    free(removed);
+    free(new_addr);
 }
 
 static int compile_func(struct fh_compiler *c, struct fh_src_loc loc,

@@ -1,0 +1,65 @@
+# The peephole pass used to delete redundant MOV instructions and simply
+# shorten the code vector. Jump offsets are baked in long before it runs, so
+# every jump that stepped over a deleted instruction then landed one
+# instruction too far -- typically on the second half of an `else` branch,
+# skipping the load of the object it was about to write to. That surfaced as
+# "invalid element access (non-container object)" or "call to non-function
+# value" on a line that was perfectly fine.
+#
+# The shape below is the smallest one that reproduced it: a closure whose
+# if-branch declares a local from a call and then contains a nested if, with an
+# else branch that has to be reached.
+
+fn flag(name) { return false; }
+
+fn Mod(app) {
+    let m = {};
+
+    m.other = fn() { app.z = 99; return 0; };
+
+    m.run = fn(inside) {
+        if (inside) {
+            let f = flag("f");
+            if (f && !app.k) { m.other(); }
+            app.k = f;
+        } else {
+            app.k = false;
+            app.z = 7;
+        }
+        return app.z;
+    };
+
+    return m;
+}
+
+fn build() {
+    let app = {};
+    app.k = true;
+    app.z = 1;
+    app.m = Mod(app);
+    return app;
+}
+
+fn main() {
+    # the else branch has to be entered whole: reaching it mid-way would try to
+    # write through a register that never got the map loaded into it
+    let a = build();
+    assert(a.m.run(false) == 7);
+    assert(a.k == false);
+
+    # and the true branch still works
+    let b = build();
+    assert(b.m.run(true) == 1);
+    assert(b.k == false);
+
+    # a MOV pair inside a loop must not shift the back edge either
+    let total = 0;
+    for (let i = 0; i < 4; i = i + 1) {
+        let step = i;
+        if (step > 1) { total = total + step; }
+        else { total = total + 100; }
+    }
+    assert(total == 205);
+
+    print("ok\n");
+}
