@@ -8,8 +8,10 @@ fn main() {
     let result = i + f;
     assert(result > 13.0 && result < 13.2);
 
-    # Integer division
-    assert(10 / 3 == 3);  # Integer division
+    # Division always produces a float, regardless of operand types.
+    # Use tointeger() when truncation is wanted.
+    assert(10 / 3 > 3.33 && 10 / 3 < 3.34);
+    assert(tointeger(10 / 3) == 3);
 
     # Float division
     assert(10.0 / 3.0 > 3.3 && 10.0 / 3.0 < 3.4);
