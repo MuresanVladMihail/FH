@@ -1,0 +1,45 @@
+# json_stringify() used to hang forever on any map: it looped on the return
+# value of the map key iterator, which stays 0 past the last key and hands
+# back a null key that restarts the scan from the first slot.
+
+fn main() {
+    # The empty map must not hang either.
+    assert(json_stringify({}) == "{}");
+
+    let m = {};
+    m["a"] = 1;
+    assert(json_stringify(m) == "{\"a\":1}");
+
+    # Several keys: check by round-tripping, since key order is unspecified.
+    let multi = {};
+    multi["one"] = 1;
+    multi["two"] = 2;
+    multi["three"] = 3;
+    let back = json_parse(json_stringify(multi));
+    assert(back["one"] == 1);
+    assert(back["two"] == 2);
+    assert(back["three"] == 3);
+
+    # Nested maps and arrays recurse through the same loop.
+    let nested = {};
+    nested["inner"] = multi;
+    nested["list"] = [1, 2, 3];
+    nested["str"] = "hello";
+    let nback = json_parse(json_stringify(nested));
+    assert(nback["inner"]["two"] == 2);
+    assert(nback["list"][2] == 3);
+    assert(nback["str"] == "hello");
+
+    # A map inside an array.
+    let arr_back = json_parse(json_stringify([m]));
+    assert(arr_back[0]["a"] == 1);
+
+    # Non-string keys are skipped, and must not stall the iteration.
+    let mixed = {};
+    mixed["kept"] = 1;
+    mixed[42] = 2;
+    let mback = json_parse(json_stringify(mixed));
+    assert(mback["kept"] == 1);
+
+    print("test_json_stringify_map: OK");
+}
