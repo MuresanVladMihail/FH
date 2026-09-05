@@ -1,0 +1,46 @@
+# Division must give the same result no matter which code path the compiler
+# picks: constant folding, the int/int fast opcode (OPC_DIVI), the float/float
+# opcode (OPC_DIVF) or the generic opcode (OPC_DIV) used when operand types
+# are unknown at compile time.
+
+fn divide(a, b) {
+    # Operand types are unknown here, so this compiles to generic OPC_DIV.
+    return a / b;
+}
+
+fn main() {
+    # Constant folding (both operands are literals).
+    assert(7 / 2 == 3.5);
+
+    # OPC_DIVI: both operands are known to be integers.
+    let a = 7;
+    let b = 2;
+    assert(a / b == 3.5);
+
+    # OPC_DIV: operand types unknown at compile time.
+    assert(divide(7, 2) == 3.5);
+
+    # OPC_DIVF and the mixed case.
+    assert(7.0 / 2.0 == 3.5);
+    assert(7 / 2.0 == 3.5);
+    assert(7.0 / 2 == 3.5);
+
+    # All four paths must agree with each other.
+    assert(7 / 2 == divide(7, 2));
+    assert(a / b == divide(a, b));
+    assert(7 / 2 == a / b);
+
+    # Exact results stay exact, and still compare equal to an integer.
+    assert(10 / 2 == 5);
+    assert(divide(10, 2) == 5);
+
+    # Truncation is opt-in via tointeger().
+    assert(tointeger(7 / 2) == 3);
+    assert(tointeger(divide(7, 2)) == 3);
+    assert(tointeger(-7 / 2) == -3);
+
+    # Division by zero is still an error on every path (checked by
+    # tests/test_division_by_zero.fh).
+
+    print("test_division_consistency: OK");
+}

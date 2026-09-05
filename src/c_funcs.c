@@ -1816,8 +1816,15 @@ static cJSON *fh_value_to_cjson(struct fh_program *prog, struct fh_value *val) {
             cJSON *json_obj = cJSON_CreateObject();
             if (!json_obj) return NULL;
 
+            // fh_next_map_object_key() returns 0 even when the iteration is
+            // over, signalling the end by handing back a null key. Stop on
+            // that, otherwise a null key restarts the scan from the first
+            // slot and this loop never terminates.
             struct fh_value key = fh_new_null();
-            while (fh_next_map_object_key(map, &key, &key) == 0) {
+            struct fh_value next_key;
+            while (fh_next_map_object_key(map, &key, &next_key) == 0
+                   && next_key.type != FH_VAL_NULL) {
+                key = next_key;
                 if (key.type != FH_VAL_STRING) continue;
 
                 const char *key_str = GET_OBJ_STRING_DATA(key.data.obj);

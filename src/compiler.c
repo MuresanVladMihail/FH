@@ -1062,17 +1062,15 @@ static int try_fold_const_bin_op(struct fh_compiler *c, struct fh_src_loc loc,
     // Perform constant folding based on operation
     int result_k = -1;
 
-    if (left_is_int && right_is_int) {
+    // '/' always produces a float, so int/int division is folded through the
+    // floating-point path below rather than truncating here.
+    if (left_is_int && right_is_int && op != '/') {
         // Integer operation
         int64_t result;
         switch (op) {
             case '+': result = left_int + right_int; break;
             case '-': result = left_int - right_int; break;
             case '*': result = left_int * right_int; break;
-            case '/':
-                if (right_int == 0) return -1;  // Don't fold division by zero
-                result = left_int / right_int;
-                break;
             case '%':
                 if (right_int == 0) return -1;  // Don't fold modulo by zero
                 result = left_int % right_int;
@@ -1223,8 +1221,9 @@ static int compile_bin_op_to_reg(struct fh_compiler *c, struct fh_src_loc loc, s
 
         case '/':
             if (hl == H_INT && hr == H_INT) {
+                // Int/int fast path, but division still produces a float.
                 opc = OPC_DIVI;
-                set_reg_hint(fi, dest_reg, H_INT);
+                set_reg_hint(fi, dest_reg, H_FLOAT);
             } else if (hl == H_FLOAT && hr == H_FLOAT) {
                 opc = OPC_DIVF;
                 set_reg_hint(fi, dest_reg, H_FLOAT);

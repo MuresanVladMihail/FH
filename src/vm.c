@@ -1398,14 +1398,17 @@ op_DIVI: {
         struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
         struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
 
-        // Fast path: both are integers
+        // Fast path: both are integers. Division always yields a float, just
+        // like the generic op_DIV path, so that `7/2` is 3.5 no matter whether
+        // the compiler could infer the operand types. Use tointeger() to
+        // truncate explicitly.
         if (fh_is_integer(rb) && fh_is_integer(rc)) {
             if (rc->data.i == 0) {
                 vm_error(vm, "division by zero");
                 goto user_err;
             }
-            ra->type = FH_VAL_INTEGER;
-            ra->data.i = rb->data.i / rc->data.i;
+            ra->type = FH_VAL_FLOAT;
+            ra->data.num = (double)rb->data.i / (double)rc->data.i;
             DISPATCH();
         }
         // Type mismatch, fallback to generic division
