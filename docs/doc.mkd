@@ -413,13 +413,18 @@ TAR archive I/O (also used for FH's own `.fhpack` package format):
 | Function | Description |
 |---|---|
 | `json_parse(s)` | Parses a JSON string into FH values (objects → maps, arrays → arrays, numbers → int or float as appropriate). |
-| `json_stringify(v)` | Serializes an FH value (null/bool/number/string/array/map) to a compact JSON string. |
+| `json_stringify(v, [pretty])` | Serializes an FH value (null/bool/number/string/array/map) to a JSON string. `pretty` defaults to `false`, which gives compact, single-line output; pass `true` for indented output, which is what you want whenever a human or a diff tool reads the result. |
 
 ```
 let data = json_parse('{"name": "John", "scores": [95, 87]}');
 data["name"];                 # "John"
 data["scores"][0];             # 95
 json_stringify({"a": 1, "b": true});   # '{"a":1,"b":true}'
+
+json_stringify({"a": 1}, true);
+# {
+#     "a":    1
+# }
 ```
 
 ### 2.9 Garbage collector (`gc*`)

@@ -1874,15 +1874,29 @@ static int fn_json_parse(struct fh_program *prog, struct fh_value *ret, struct f
     return 0;
 }
 
+/*
+ * json_stringify(value, [pretty])
+ *
+ * `pretty` is optional and defaults to false, which keeps the compact,
+ * single-line output. Pass true for indented output -- worth it whenever the
+ * result is a file a human reads or a diff tool has to show.
+ */
 static int fn_json_stringify(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
-    if (check_n_args(prog, "json_stringify()", 1, n_args))
-        return -1;
+    if (n_args < 1 || n_args > 2)
+        return fh_set_error(prog, "json_stringify(): expected 1 or 2 arguments, got %d", n_args);
+
+    bool pretty = false;
+    if (n_args == 2) {
+        if (!fh_is_bool(&args[1]))
+            return fh_set_error(prog, "json_stringify(): expected a boolean as the second argument");
+        pretty = fh_get_bool(&args[1]);
+    }
 
     cJSON *json = fh_value_to_cjson(prog, &args[0]);
     if (!json)
         return fh_set_error(prog, "json_stringify() failed to convert value to JSON");
 
-    char *json_str = cJSON_PrintUnformatted(json);
+    char *json_str = pretty ? cJSON_Print(json) : cJSON_PrintUnformatted(json);
     cJSON_Delete(json);
 
     if (!json_str)
