@@ -1,0 +1,96 @@
+# SYNTAX TEST "Packages/FH/FH.sublime-syntax"
+
+# a line comment TODO: fix
+# <- comment.line.number-sign.fh punctuation.definition.comment.fh
+# ^^^^^^^^^^^^^^ comment.line.number-sign.fh
+#                ^^^^^ comment.line.number-sign.fh keyword.other.todo.fh
+#- block comment -# let
+# <- comment.block.fh punctuation.definition.comment.begin.fh
+#  ^^^^^^^^^^^^^ comment.block.fh
+#                ^^ comment.block.fh punctuation.definition.comment.end.fh
+#                   ^^^ keyword.declaration.variable.fh - comment
+
+include "lib.fh"
+# <- keyword.control.import.fh
+#       ^ string.quoted.double.fh punctuation.definition.string.begin.fh
+#        ^^^^^^ string.quoted.double.fh
+
+fn greet(name, greeting = "Hi", n = 3)
+# <- keyword.declaration.function.fh
+#  ^^^^^ entity.name.function.fh
+#       ^ punctuation.section.parameters.begin.fh
+#        ^^^^ meta.function.parameters.fh variable.parameter.fh
+#            ^ punctuation.separator.parameters.fh
+#                       ^ keyword.operator.assignment.fh
+#                         ^^^^ string.quoted.double.fh
+#                                   ^ constant.numeric.integer.fh
+#                                    ^ punctuation.section.parameters.end.fh
+    : "greets someone"
+#   ^ punctuation.separator.annotation.fh
+#     ^^^^^^^^^^^^^^^^ meta.function.docstring.fh string.quoted.double.fh
+{
+# <- punctuation.section.block.begin.fh
+    let msg = "${greeting}, ${name}!";
+#   ^^^ keyword.declaration.variable.fh
+#              ^^ meta.interpolation.fh punctuation.section.interpolation.begin.fh
+#                ^^^^^^^^ meta.interpolation.fh - string
+#                        ^ meta.interpolation.fh punctuation.section.interpolation.end.fh
+#                         ^^ string.quoted.double.fh - meta.interpolation
+#                                    ^ punctuation.terminator.fh
+    printf("%d %s\n", n, msg);
+#   ^^^^^^ support.function.builtin.fh
+#         ^ punctuation.section.group.begin.fh
+#                ^^ string.quoted.double.fh constant.character.escape.fh
+#                           ^ punctuation.section.group.end.fh
+    let bad = "\q";
+#              ^^ string.quoted.double.fh invalid.illegal.unknown-escape.fh
+    return msg;
+#   ^^^^^^ keyword.control.flow.return.fh
+}
+# <- punctuation.section.block.end.fh
+
+fn main() {
+#  ^^^^ entity.name.function.fh
+    let cfg = { "key": 1.5, 'other': null };
+#               ^^^^^ meta.mapping.key.fh string.quoted.double.fh
+#                    ^ punctuation.separator.key-value.fh
+#                      ^^^ constant.numeric.float.fh
+#                           ^^^^^^^ meta.mapping.key.fh string.quoted.single.fh
+#                                    ^^^^ constant.language.null.fh
+    let v = cfg?.["key"];
+#              ^^ keyword.operator.accessor.optional.fh
+#                ^ punctuation.section.brackets.begin.fh
+#                      ^ punctuation.section.brackets.end.fh
+    for (let i = 0; i < len(cfg); i++) {
+#   ^^^ keyword.control.loop.fh
+#        ^^^ keyword.declaration.variable.fh
+#                     ^ keyword.operator.comparison.fh
+#                       ^^^ support.function.builtin.fh
+#                                  ^^ keyword.operator.arithmetic.fh
+        if (i >= 2 && true) { continue; } elif (i) { break; }
+#       ^^ keyword.control.conditional.fh
+#             ^^ keyword.operator.comparison.fh
+#                  ^^ keyword.operator.logical.fh
+#                     ^^^^ constant.language.boolean.fh
+#                             ^^^^^^^^ keyword.control.flow.fh
+#                                         ^^^^ keyword.control.conditional.fh
+#                                                    ^^^^^ keyword.control.flow.fh
+    }
+    let mask = 1 << 3 | 2 ^ ~4 & 5;
+#                ^^ keyword.operator.bitwise.fh
+#                     ^ keyword.operator.bitwise.fh
+#                         ^ keyword.operator.bitwise.fh
+#                           ^ keyword.operator.bitwise.fh
+#                              ^ keyword.operator.bitwise.fh
+    cfg.method(math_pi());
+#      ^ punctuation.accessor.fh
+#       ^^^^^^ variable.function.member.fh
+#              ^^^^^^^ support.function.builtin.fh
+    greet('world');
+#   ^^^^^ variable.function.fh
+#         ^^^^^^^ string.quoted.single.fh
+    repeat { } until (false);
+#   ^^^^^^ keyword.control.loop.fh
+#              ^^^^^ keyword.control.loop.fh
+#                     ^^^^^ constant.language.boolean.fh
+}

@@ -1,0 +1,8 @@
+{
+	// Settings applied to every file using the FH syntax.
+	// (Commenting is driven by Comments.tmPreferences, not by settings.)
+	"tab_size": 4,
+	"translate_tabs_to_spaces": true,
+	"auto_complete_selector": "source.fh - comment - string",
+	"ensure_newline_at_eof_on_save": true
+}

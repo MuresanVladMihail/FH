@@ -204,6 +204,15 @@ fn main() {
 }
 ```
 
+## Editor Support
+
+Editor integrations live under `tools/`:
+
+- **Sublime Text** -- `tools/Sublime/FH` (syntax, completions, build system,
+  symbol list; see its README for installation)
+- **VS Code** -- `tools/VSCode/extensions/gwl.fh-0.1.0`
+- **Vim** -- `tools/vim`
+
 ## License
 
 Copyright (c) 2019-2026 Mureşan Vlad Mihail

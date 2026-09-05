@@ -1,0 +1,1049 @@
+{
+  "scope": "source.fh - comment - string",
+  "completions": [
+    {
+      "trigger": "append",
+      "contents": "append($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "assert",
+      "contents": "assert($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "contains_key",
+      "contents": "contains_key($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "delete",
+      "contents": "delete($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "docstring",
+      "contents": "docstring($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "error",
+      "contents": "error($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "eval",
+      "contents": "eval($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "gc",
+      "contents": "gc()$0",
+      "kind": [
+        "function",
+        "f",
+        "FH gc"
+      ]
+    },
+    {
+      "trigger": "gc_frequency",
+      "contents": "gc_frequency($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH gc"
+      ]
+    },
+    {
+      "trigger": "gc_info",
+      "contents": "gc_info()$0",
+      "kind": [
+        "function",
+        "f",
+        "FH gc"
+      ]
+    },
+    {
+      "trigger": "gc_pause",
+      "contents": "gc_pause($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH gc"
+      ]
+    },
+    {
+      "trigger": "getversion",
+      "contents": "getversion()$0",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "has",
+      "contents": "has($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "io_close",
+      "contents": "io_close($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH io"
+      ]
+    },
+    {
+      "trigger": "io_filetype",
+      "contents": "io_filetype($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH io"
+      ]
+    },
+    {
+      "trigger": "io_mkdir",
+      "contents": "io_mkdir($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH io"
+      ]
+    },
+    {
+      "trigger": "io_open",
+      "contents": "io_open($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH io"
+      ]
+    },
+    {
+      "trigger": "io_read",
+      "contents": "io_read($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH io"
+      ]
+    },
+    {
+      "trigger": "io_remove",
+      "contents": "io_remove($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH io"
+      ]
+    },
+    {
+      "trigger": "io_rename",
+      "contents": "io_rename($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH io"
+      ]
+    },
+    {
+      "trigger": "io_scan_line",
+      "contents": "io_scan_line()$0",
+      "kind": [
+        "function",
+        "f",
+        "FH io"
+      ]
+    },
+    {
+      "trigger": "io_seek",
+      "contents": "io_seek($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH io"
+      ]
+    },
+    {
+      "trigger": "io_tar_close",
+      "contents": "io_tar_close($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH tar"
+      ]
+    },
+    {
+      "trigger": "io_tar_list",
+      "contents": "io_tar_list($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH tar"
+      ]
+    },
+    {
+      "trigger": "io_tar_open",
+      "contents": "io_tar_open($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH tar"
+      ]
+    },
+    {
+      "trigger": "io_tar_read",
+      "contents": "io_tar_read($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH tar"
+      ]
+    },
+    {
+      "trigger": "io_tar_write_data",
+      "contents": "io_tar_write_data($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH tar"
+      ]
+    },
+    {
+      "trigger": "io_tar_write_finalize",
+      "contents": "io_tar_write_finalize($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH tar"
+      ]
+    },
+    {
+      "trigger": "io_tar_write_header",
+      "contents": "io_tar_write_header($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH tar"
+      ]
+    },
+    {
+      "trigger": "io_write",
+      "contents": "io_write($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH io"
+      ]
+    },
+    {
+      "trigger": "json_parse",
+      "contents": "json_parse($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH json"
+      ]
+    },
+    {
+      "trigger": "json_stringify",
+      "contents": "json_stringify($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH json"
+      ]
+    },
+    {
+      "trigger": "len",
+      "contents": "len($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "math_abs",
+      "contents": "math_abs($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_acos",
+      "contents": "math_acos($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_asin",
+      "contents": "math_asin($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_atan",
+      "contents": "math_atan($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_atan2",
+      "contents": "math_atan2($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_bcrypt_gen_salt",
+      "contents": "math_bcrypt_gen_salt($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_bcrypt_hashpw",
+      "contents": "math_bcrypt_hashpw($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_ceil",
+      "contents": "math_ceil($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_clamp",
+      "contents": "math_clamp($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_cos",
+      "contents": "math_cos($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_cosh",
+      "contents": "math_cosh($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_deg",
+      "contents": "math_deg($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_exp",
+      "contents": "math_exp($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_floor",
+      "contents": "math_floor($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_flt_epsilon",
+      "contents": "math_flt_epsilon()$0",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_fmod",
+      "contents": "math_fmod($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_frexp",
+      "contents": "math_frexp($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_huge",
+      "contents": "math_huge()$0",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_ldexp",
+      "contents": "math_ldexp($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_log",
+      "contents": "math_log($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_log10",
+      "contents": "math_log10($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_max",
+      "contents": "math_max($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_maxval",
+      "contents": "math_maxval()$0",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_md5",
+      "contents": "math_md5($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_min",
+      "contents": "math_min($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_modf",
+      "contents": "math_modf($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_pi",
+      "contents": "math_pi()$0",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_pow",
+      "contents": "math_pow($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_rad",
+      "contents": "math_rad($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_random",
+      "contents": "math_random($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_randomseed",
+      "contents": "math_randomseed($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_sin",
+      "contents": "math_sin($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_sinh",
+      "contents": "math_sinh($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_sqrt",
+      "contents": "math_sqrt($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_tan",
+      "contents": "math_tan($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "math_tanh",
+      "contents": "math_tanh($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH math"
+      ]
+    },
+    {
+      "trigger": "next_key",
+      "contents": "next_key($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "os_command",
+      "contents": "os_command($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH os"
+      ]
+    },
+    {
+      "trigger": "os_difftime",
+      "contents": "os_difftime($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH os"
+      ]
+    },
+    {
+      "trigger": "os_getOS",
+      "contents": "os_getOS($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH os"
+      ]
+    },
+    {
+      "trigger": "os_getenv",
+      "contents": "os_getenv($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH os"
+      ]
+    },
+    {
+      "trigger": "os_localtime",
+      "contents": "os_localtime($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH os"
+      ]
+    },
+    {
+      "trigger": "os_time",
+      "contents": "os_time()$0",
+      "kind": [
+        "function",
+        "f",
+        "FH os"
+      ]
+    },
+    {
+      "trigger": "print",
+      "contents": "print($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "printf",
+      "contents": "printf($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "println",
+      "contents": "println($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "reserve",
+      "contents": "reserve($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "reset",
+      "contents": "reset()$0",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "string_char",
+      "contents": "string_char($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH string"
+      ]
+    },
+    {
+      "trigger": "string_find",
+      "contents": "string_find($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH string"
+      ]
+    },
+    {
+      "trigger": "string_format",
+      "contents": "string_format($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH string"
+      ]
+    },
+    {
+      "trigger": "string_join",
+      "contents": "string_join($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH string"
+      ]
+    },
+    {
+      "trigger": "string_lower",
+      "contents": "string_lower($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH string"
+      ]
+    },
+    {
+      "trigger": "string_match",
+      "contents": "string_match($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH string"
+      ]
+    },
+    {
+      "trigger": "string_reverse",
+      "contents": "string_reverse($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH string"
+      ]
+    },
+    {
+      "trigger": "string_slice",
+      "contents": "string_slice($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH string"
+      ]
+    },
+    {
+      "trigger": "string_split",
+      "contents": "string_split($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH string"
+      ]
+    },
+    {
+      "trigger": "string_substr",
+      "contents": "string_substr($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH string"
+      ]
+    },
+    {
+      "trigger": "string_trim",
+      "contents": "string_trim($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH string"
+      ]
+    },
+    {
+      "trigger": "string_upper",
+      "contents": "string_upper($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH string"
+      ]
+    },
+    {
+      "trigger": "tointeger",
+      "contents": "tointeger($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "tonumber",
+      "contents": "tonumber($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "tostring",
+      "contents": "tostring($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "type",
+      "contents": "type($0)",
+      "kind": [
+        "function",
+        "f",
+        "FH core"
+      ]
+    },
+    {
+      "trigger": "fn",
+      "contents": "fn ${1:name}(${2:args}) {\n\t$0\n}",
+      "kind": [
+        "snippet",
+        "s",
+        "FH"
+      ]
+    },
+    {
+      "trigger": "fndoc",
+      "contents": "fn ${1:name}(${2:args})\n: \"${3:documentation}\"\n{\n\t$0\n}",
+      "kind": [
+        "snippet",
+        "s",
+        "FH"
+      ]
+    },
+    {
+      "trigger": "fnanon",
+      "contents": "fn (${1:args}) {\n\t$0\n}",
+      "kind": [
+        "snippet",
+        "s",
+        "FH"
+      ]
+    },
+    {
+      "trigger": "if",
+      "contents": "if (${1:cond}) {\n\t$0\n}",
+      "kind": [
+        "snippet",
+        "s",
+        "FH"
+      ]
+    },
+    {
+      "trigger": "ifelse",
+      "contents": "if (${1:cond}) {\n\t$2\n} else {\n\t$0\n}",
+      "kind": [
+        "snippet",
+        "s",
+        "FH"
+      ]
+    },
+    {
+      "trigger": "elif",
+      "contents": "elif (${1:cond}) {\n\t$0\n}",
+      "kind": [
+        "snippet",
+        "s",
+        "FH"
+      ]
+    },
+    {
+      "trigger": "else",
+      "contents": "else {\n\t$0\n}",
+      "kind": [
+        "snippet",
+        "s",
+        "FH"
+      ]
+    },
+    {
+      "trigger": "while",
+      "contents": "while (${1:cond}) {\n\t$0\n}",
+      "kind": [
+        "snippet",
+        "s",
+        "FH"
+      ]
+    },
+    {
+      "trigger": "for",
+      "contents": "for (let ${1:i} = 0; ${1:i} < ${2:n}; ${1:i}++) {\n\t$0\n}",
+      "kind": [
+        "snippet",
+        "s",
+        "FH"
+      ]
+    },
+    {
+      "trigger": "repeat",
+      "contents": "repeat {\n\t$0\n} until (${1:cond});",
+      "kind": [
+        "snippet",
+        "s",
+        "FH"
+      ]
+    },
+    {
+      "trigger": "let",
+      "contents": "let ${1:name} = ${0:value};",
+      "kind": [
+        "snippet",
+        "s",
+        "FH"
+      ]
+    },
+    {
+      "trigger": "include",
+      "contents": "include \"${1:file.fh}\";",
+      "kind": [
+        "snippet",
+        "s",
+        "FH"
+      ]
+    },
+    {
+      "trigger": "main",
+      "contents": "fn main() {\n\t$0\n}",
+      "kind": [
+        "snippet",
+        "s",
+        "FH"
+      ]
+    },
+    {
+      "trigger": "break",
+      "contents": "break",
+      "kind": [
+        "keyword",
+        "k",
+        "FH"
+      ]
+    },
+    {
+      "trigger": "continue",
+      "contents": "continue",
+      "kind": [
+        "keyword",
+        "k",
+        "FH"
+      ]
+    },
+    {
+      "trigger": "return",
+      "contents": "return",
+      "kind": [
+        "keyword",
+        "k",
+        "FH"
+      ]
+    },
+    {
+      "trigger": "true",
+      "contents": "true",
+      "kind": [
+        "variable",
+        "c",
+        "FH constant"
+      ]
+    },
+    {
+      "trigger": "false",
+      "contents": "false",
+      "kind": [
+        "variable",
+        "c",
+        "FH constant"
+      ]
+    },
+    {
+      "trigger": "null",
+      "contents": "null",
+      "kind": [
+        "variable",
+        "c",
+        "FH constant"
+      ]
+    }
+  ]
+}
