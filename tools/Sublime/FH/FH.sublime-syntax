@@ -1,0 +1,332 @@
+%YAML 1.2
+---
+# Syntax definition for the FH scripting language.
+# https://github.com/MuresanVladMihail/FH
+#
+# See http://www.sublimetext.com/docs/syntax.html
+name: FH
+scope: source.fh
+version: 2
+
+file_extensions:
+  - fh
+
+first_line_match: '^#!.*\bfh\b'
+
+variables:
+  ident: '[A-Za-z_][A-Za-z_0-9]*'
+
+  # Built-in functions registered in src/c_funcs.c (fh_std_c_funcs[]),
+  # plus the `len` / `append` intrinsics inlined by src/compiler.c.
+  builtin_core: 'append|assert|contains_key|delete|docstring|error|eval|getversion|has|len|next_key|print|printf|println|reserve|reset|tointeger|tonumber|tostring|type'
+  builtin_gc: 'gc|gc_frequency|gc_info|gc_pause'
+  builtin_io: 'io_close|io_filetype|io_mkdir|io_open|io_read|io_remove|io_rename|io_scan_line|io_seek|io_tar_close|io_tar_list|io_tar_open|io_tar_read|io_tar_write_data|io_tar_write_finalize|io_tar_write_header|io_write'
+  builtin_json: 'json_parse|json_stringify'
+  builtin_math: 'math_abs|math_acos|math_asin|math_atan|math_atan2|math_bcrypt_gen_salt|math_bcrypt_hashpw|math_ceil|math_clamp|math_cos|math_cosh|math_deg|math_exp|math_floor|math_flt_epsilon|math_fmod|math_frexp|math_huge|math_ldexp|math_log|math_log10|math_max|math_maxval|math_md5|math_min|math_modf|math_pi|math_pow|math_rad|math_random|math_randomseed|math_sin|math_sinh|math_sqrt|math_tan|math_tanh'
+  builtin_os: 'os_command|os_difftime|os_getenv|os_getOS|os_localtime|os_time'
+  builtin_string: 'string_char|string_find|string_format|string_join|string_lower|string_match|string_reverse|string_slice|string_split|string_substr|string_trim|string_upper'
+  builtin: '{{builtin_core}}|{{builtin_gc}}|{{builtin_io}}|{{builtin_json}}|{{builtin_math}}|{{builtin_os}}|{{builtin_string}}'
+
+  # Single-line string literals, used only in lookaheads (map keys).
+  dq_literal: '"(?:[^"\\]|\\.)*"'
+  sq_literal: "'(?:[^'\\\\]|\\\\.)*'"
+
+contexts:
+
+  prototype:
+    - include: comments
+
+  main:
+    - include: statements
+
+  statements:
+    - include: include-statement
+    - include: function-definition
+    - include: keywords
+    - include: expressions
+
+  expressions:
+    - include: strings
+    - include: numbers
+    - include: constants
+    - include: builtin-functions
+    - include: function-call
+    - include: member-access
+    - include: parens
+    - include: brackets
+    - include: braces
+    - include: operators
+    - include: punctuation
+    - include: identifiers
+
+###[ COMMENTS ]################################################################
+
+  comments:
+    - include: block-comment
+    - include: line-comment
+
+  block-comment:
+    - match: '#-'
+      scope: punctuation.definition.comment.begin.fh
+      push: block-comment-body
+
+  block-comment-body:
+    - meta_include_prototype: false
+    - meta_scope: comment.block.fh
+    # The tokenizer does not track nesting: the first `-#` closes the comment.
+    - match: '-#'
+      scope: punctuation.definition.comment.end.fh
+      pop: true
+    - include: comment-tags
+
+  line-comment:
+    - match: '#'
+      scope: punctuation.definition.comment.fh
+      push: line-comment-body
+
+  line-comment-body:
+    - meta_include_prototype: false
+    - meta_scope: comment.line.number-sign.fh
+    - match: $\n?
+      pop: true
+    - include: comment-tags
+
+  comment-tags:
+    - match: '\b(?i:todo|tbd|fixme|xxx|note|hack)\b:?'
+      scope: keyword.other.todo.fh
+
+###[ KEYWORDS & CONSTANTS ]####################################################
+
+  keywords:
+    - match: '\b(?:if|elif|else)\b'
+      scope: keyword.control.conditional.fh
+    - match: '\b(?:while|for|repeat|until)\b'
+      scope: keyword.control.loop.fh
+    - match: '\breturn\b'
+      scope: keyword.control.flow.return.fh
+    - match: '\b(?:break|continue)\b'
+      scope: keyword.control.flow.fh
+    - match: '\blet\b'
+      scope: keyword.declaration.variable.fh
+
+  include-statement:
+    - match: '\binclude\b'
+      scope: keyword.control.import.fh
+
+  constants:
+    - match: '\b(?:true|false)\b'
+      scope: constant.language.boolean.fh
+    - match: '\bnull\b'
+      scope: constant.language.null.fh
+
+###[ NUMBERS ]#################################################################
+# The tokenizer only accepts decimal digits with at most one `.`; there are no
+# hexadecimal, exponent or suffix forms.
+
+  numbers:
+    - match: '\b\d+\.\d*'
+      scope: constant.numeric.float.fh
+    - match: '\b\d+\b'
+      scope: constant.numeric.integer.fh
+
+###[ STRINGS ]#################################################################
+
+  strings:
+    - match: '"'
+      scope: punctuation.definition.string.begin.fh
+      push: double-quoted-string
+    - match: "'"
+      scope: punctuation.definition.string.begin.fh
+      push: single-quoted-string
+
+  double-quoted-string:
+    - meta_include_prototype: false
+    - meta_scope: string.quoted.double.fh
+    - match: '"'
+      scope: punctuation.definition.string.end.fh
+      pop: true
+    - include: string-content
+
+  single-quoted-string:
+    - meta_include_prototype: false
+    - meta_scope: string.quoted.single.fh
+    - match: "'"
+      scope: punctuation.definition.string.end.fh
+      pop: true
+    - include: string-content
+
+  string-content:
+    # read_string() in src/tokenizer.c accepts exactly these escapes.
+    - match: '\\["''\\entr]'
+      scope: constant.character.escape.fh
+    - match: '\\.'
+      scope: invalid.illegal.unknown-escape.fh
+    - match: '\$\{'
+      scope: punctuation.section.interpolation.begin.fh
+      push: string-interpolation
+
+  string-interpolation:
+    - meta_include_prototype: false
+    - clear_scopes: 1
+    - meta_scope: meta.interpolation.fh
+    # The parser closes the interpolation at the first `}`.
+    - match: '\}'
+      scope: punctuation.section.interpolation.end.fh
+      pop: true
+    - match: '(?=\n)'
+      pop: true
+    - include: expressions
+
+###[ FUNCTIONS ]###############################################################
+
+  function-definition:
+    - match: '\b(fn)\b(?:\s+({{ident}}))?'
+      captures:
+        1: keyword.declaration.function.fh
+        2: entity.name.function.fh
+      push: function-signature
+
+  function-signature:
+    - meta_scope: meta.function.fh
+    - match: '\('
+      scope: punctuation.section.parameters.begin.fh
+      set: function-parameters
+    - match: '(?=\S)'
+      pop: true
+
+  function-parameters:
+    - meta_scope: meta.function.parameters.fh
+    - match: '\)'
+      scope: punctuation.section.parameters.end.fh
+      set: function-docstring
+    - match: ','
+      scope: punctuation.separator.parameters.fh
+    - match: '='
+      scope: keyword.operator.assignment.fh
+      push: parameter-default-value
+    - match: '{{ident}}'
+      scope: variable.parameter.fh
+
+  parameter-default-value:
+    - match: '(?=[,)])'
+      pop: true
+    - include: statements
+
+  # `fn f() : "documentation" { ... }` -- see fh_parse_func() in src/parser.c.
+  function-docstring:
+    - meta_scope: meta.function.fh
+    - match: '(:)(?=\s*["''])'
+      captures:
+        1: punctuation.separator.annotation.fh
+      set: function-docstring-value
+    - match: '(?=\S)'
+      pop: true
+
+  function-docstring-value:
+    - meta_scope: meta.function.docstring.fh
+    - include: strings
+    - match: '(?=\S)|$'
+      pop: true
+
+  function-call:
+    - match: '\b({{ident}})\s*(?=\()'
+      scope: variable.function.fh
+
+###[ VARIABLES & MEMBERS ]#####################################################
+
+  builtin-functions:
+    - match: '\b(?:{{builtin}})\b'
+      scope: support.function.builtin.fh
+
+  member-access:
+    - match: '(\?\.|\.)\s*({{ident}})\s*(?=\()'
+      captures:
+        1: punctuation.accessor.fh
+        2: variable.function.member.fh
+    - match: '(\?\.|\.)\s*({{ident}})'
+      captures:
+        1: punctuation.accessor.fh
+        2: variable.other.member.fh
+
+  identifiers:
+    - match: '\b{{ident}}\b'
+
+###[ BRACKETS & BLOCKS ]#######################################################
+
+  parens:
+    - match: '\('
+      scope: punctuation.section.group.begin.fh
+      push: parens-body
+
+  parens-body:
+    - meta_scope: meta.group.fh
+    - match: '\)'
+      scope: punctuation.section.group.end.fh
+      pop: true
+    - include: statements
+
+  brackets:
+    - match: '\['
+      scope: punctuation.section.brackets.begin.fh
+      push: brackets-body
+
+  brackets-body:
+    - meta_scope: meta.brackets.fh
+    - match: '\]'
+      scope: punctuation.section.brackets.end.fh
+      pop: true
+    - include: statements
+
+  # `{` opens both statement blocks and map literals.
+  braces:
+    - match: '\{'
+      scope: punctuation.section.block.begin.fh
+      push: braces-body
+
+  braces-body:
+    - meta_scope: meta.block.fh
+    - match: '\}'
+      scope: punctuation.section.block.end.fh
+      pop: true
+    - include: map-key
+    - include: statements
+
+  map-key:
+    - match: '(?=(?:{{dq_literal}}|{{sq_literal}})\s*:)'
+      push: map-key-body
+
+  map-key-body:
+    - meta_scope: meta.mapping.key.fh
+    - include: strings
+    - match: '(?=\s*:)'
+      pop: true
+    - match: '(?=\S)'
+      pop: true
+
+###[ OPERATORS & PUNCTUATION ]#################################################
+
+  operators:
+    - match: '\?\.'
+      scope: keyword.operator.accessor.optional.fh
+    - match: '\+\+|--'
+      scope: keyword.operator.arithmetic.fh
+    - match: '==|!=|<=|>=|<(?!<)|>(?!>)'
+      scope: keyword.operator.comparison.fh
+    - match: '\|\||&&|!'
+      scope: keyword.operator.logical.fh
+    - match: '<<|>>|[&|^~]'
+      scope: keyword.operator.bitwise.fh
+    - match: '='
+      scope: keyword.operator.assignment.fh
+    - match: '[-+*/%]'
+      scope: keyword.operator.arithmetic.fh
+
+  punctuation:
+    - match: ';'
+      scope: punctuation.terminator.fh
+    - match: ','
+      scope: punctuation.separator.fh
+    - match: ':'
+      scope: punctuation.separator.key-value.fh
+    - match: '\.'
+      scope: punctuation.accessor.fh
