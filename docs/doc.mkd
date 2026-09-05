@@ -230,6 +230,162 @@ include "helpers.fh";
 current file at compile time; see `src/input.c` for the include and
 `.fhpack` (packaged/tar'd script bundle) machinery.
 
+`include` is textual: the file's tokens are spliced in where the directive
+appears, and every declaration lands in the same global namespace. There is
+no `import` expression — `let m = import "mod.fh";` is not FH. What takes
+its place is the object pattern in the next section: `include` the file,
+then call the factory it declares.
+
+### 1.12 Objects and modules
+
+FH has no classes, but it has closures that capture their enclosing scope,
+and maps that can hold functions. Those two together give you objects:
+a function that builds a map of functions and returns it is a constructor,
+and the locals it closes over are that object's private state.
+
+```
+fn Stack() {
+    let items = [];            # private: never put on the map
+    let count = 0;
+
+    let stack = {};
+
+    stack.push = fn(v) {
+        items[count] = v;
+        count = count + 1;
+    };
+
+    stack.pop = fn() {
+        if (count == 0) { return null; }
+        count = count - 1;
+        return items[count];
+    };
+
+    stack.size = fn() { return count; };
+
+    return stack;
+}
+
+let a = Stack();
+let b = Stack();
+a.push(1);
+a.push(2);
+b.push(9);
+print(a.pop());    # 2
+print(a.size());   # 1
+print(b.size());   # 1  - the two do not share anything
+```
+
+Three things fall out of this, and they are what make it worth using
+rather than a bag of global functions:
+
+- **Privacy is real.** `items` and `count` are locals. Nothing outside
+  `Stack()` can name them, so the only way to touch the contents is
+  through the functions that were put on the map.
+- **Instances are independent.** Every call to the constructor makes a
+  fresh set of locals, so two objects never tread on each other.
+- **Methods are bound.** A method does not need to be handed the object
+  it belongs to; it already closed over everything it needs. That is why
+  `a.pop()` works and no `self` argument appears anywhere.
+
+Closures capture the scope, not a snapshot, so a method may also refer to
+a sibling method, or to the map itself, even if the assignment happens
+later in the constructor — by the time the method runs, they are all
+there:
+
+```
+fn Greeter(name) {
+    let g = {};
+
+    let punctuation = fn() {
+        if (g.excited) { return "!"; }
+        return ".";
+    };
+
+    g.excited = false;
+    g.hello = fn() { return "Hello, " + name + punctuation(); };
+
+    return g;
+}
+
+let g = Greeter("world");
+print(g.hello());     # Hello, world.
+g.excited = true;
+print(g.hello());     # Hello, world!
+```
+
+#### One object per file
+
+For anything longer than a page, give each concern its own file, with one
+constructor named after it, and let the caller assemble them. The file
+declares exactly one thing; everything else in it stays local.
+
+```
+# counter.fh
+fn Counter(start) {
+    let n = start;
+    let c = {};
+    c.next = fn() { n = n + 1; return n; };
+    c.read = fn() { return n; };
+    return c;
+}
+```
+
+```
+# report.fh
+fn Report(app) {
+    let report = {};
+
+    # Private helper: not on the map, so not part of the interface.
+    let line = fn(label, value) { return label + ": " + value + "\n"; };
+
+    report.render = fn() {
+        return line("hits", app.hits.read())
+             + line("misses", app.misses.read());
+    };
+
+    return report;
+}
+```
+
+```
+# main.fh
+include "counter.fh"
+include "report.fh"
+
+fn main() {
+    let app = {};
+    app.hits = Counter(0);
+    app.misses = Counter(0);
+    app.report = Report(app);      # captures `app`, so it sees later changes
+
+    app.hits.next();
+    app.hits.next();
+    app.misses.next();
+
+    print(app.report.render());
+}
+```
+
+Passing the shared state into the constructor once — `Report(app)` — is
+what keeps it out of every call afterwards. The constructor captures it,
+and every method reads it live, so a field written after construction is
+still visible to methods built before it.
+
+A few conventions that keep this readable:
+
+- Name the constructor after the file: `render.fh` declares `Render`,
+  `physics.fh` declares `Physics`. `include` puts them all in one global
+  namespace, so a name shared by two files is a silent collision.
+- Put on the map only what callers should reach. Everything else is a
+  local, and stays unreachable by construction.
+- Build the objects in one place, in dependency order, and hang them off a
+  single state map. Constructors that take that map see each other through
+  it without needing to be given one another directly.
+- `include` each file exactly once, at the top of the entry file. Because
+  the splice is textual, including a file twice declares its functions
+  twice.
+
 ---
 
 ## 2. Standard library reference

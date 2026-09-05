@@ -134,6 +134,11 @@ fn main() {
 }
 ```
 
+A closure returning a map of functions is how FH does objects: the locals it
+captures are private state, each call makes an independent instance, and the
+methods need no `self`. Section 1.12 of [`docs/doc.mkd`](docs/doc.mkd) covers
+the pattern and how to give each object its own file.
+
 ### Mandelbrot Set
 
 ```
