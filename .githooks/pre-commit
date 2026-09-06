@@ -1,0 +1,55 @@
+#!/bin/sh
+# FH pre-commit hook: build the interpreter and run the whole test suite.
+#
+# Installed with: .githooks/install.sh  (sets core.hooksPath to this directory)
+#
+# The working tree is what gets built and tested, not the staged snapshot:
+# stashing unstaged changes behind the user's back is the classic way for a
+# hook to lose work, and this repo is checked out in several worktrees that
+# share one stash stack. So: commit what you tested, and keep the tree clean.
+#
+# Escape hatches:
+#   git commit --no-verify      skip every hook
+#   FH_SKIP_TESTS=1 git commit  skip just this one
+set -u
+
+[ "${FH_SKIP_TESTS:-0}" = "1" ] && { echo "pre-commit: FH_SKIP_TESTS=1, skipping tests."; exit 0; }
+
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
+
+# A docs-only commit can't break the interpreter, so don't make the author wait
+# for a build. Anything else -- C sources, the Makefile, .fh tests -- runs.
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$staged" ] && exit 0
+if ! printf '%s\n' "$staged" | grep -qvE '\.(md|txt)$|^docs/|^LICENSE'; then
+    echo "pre-commit: docs-only change, skipping tests."
+    exit 0
+fi
+
+jobs=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
+log=$(mktemp "${TMPDIR:-/tmp}/fh_precommit.XXXXXX")
+trap 'rm -f "$log"' EXIT
+
+printf 'pre-commit: building fh (make -j%s)... ' "$jobs"
+if ! make -j"$jobs" >"$log" 2>&1; then
+    echo "FAILED"
+    tail -40 "$log"
+    echo
+    echo "pre-commit: build failed, commit aborted."
+    exit 1
+fi
+echo "ok"
+
+echo "pre-commit: running tests..."
+if ! ./run_tests.sh >"$log" 2>&1; then
+    grep -aE '\[FAIL\]|Failed:|Passed:' "$log"
+    echo
+    echo "pre-commit: tests failed, commit aborted."
+    echo "            full output: ./run_tests.sh"
+    echo "            bypass:      git commit --no-verify"
+    exit 1
+fi
+
+grep -aE 'Passed:|Failed:' "$log"
+echo "pre-commit: all tests passed."
