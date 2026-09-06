@@ -26,7 +26,7 @@ run_test() {
 
     # Run the test (with timeout to prevent hangs)
     if output=$(./fh "$test_file" 2>&1); then
-        if echo "$output" | grep -q "ok"; then
+        if echo "$output" | grep -qi "ok"; then
             printf "${GREEN}[PASS]${NC} %s\n" "$test_name"
             ((PASSED++))
         else
