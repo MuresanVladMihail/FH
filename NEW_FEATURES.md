@@ -1,6 +1,6 @@
 # New Features Implementation Summary
 
-## ✅ Completed Features (6/6)
+## ✅ Completed Features (7/7)
 
 ### 1. String Interpolation
 
@@ -173,6 +173,49 @@ let no_profile = partial?.["profile"]?.["address"];  # null
 - Pattern: Check if container is null → if yes, return null; if no, perform indexing
 
 **Files Modified:** `src/ast.h`, `src/operator.c`, `src/parser.c`, `src/compiler.c`, `src/ast.c`
+
+---
+
+### 7. `pcall` — catching an error instead of dying
+
+FH has no `try`/`catch`, and it does not need one to be able to recover: an
+error is a return code all the way up, so a protected call is enough.
+
+```fh
+let r = pcall(load_level, "level3.json");
+if (r.ok) {
+    start(r.value);
+} else {
+    println("could not load the level: " + r.error);
+    println(r.traceback);
+    start(default_level());
+}
+```
+
+`pcall(f [, args...])` always returns a map:
+
+```
+{ ok: true,  value: <what f returned>, error: null }
+{ ok: false, value: null, error: "<message>",
+  file: "...", line: n, col: n, traceback: "..." }
+```
+
+- `f` may be a script function, an anonymous one, or a **C function** the host
+  registered — a binding that returns -1 is caught the same way, which is the
+  case that matters when FH is embedded in an engine.
+- Wrap an expression with `pcall(fn() { ... })`.
+- It nests, and its own misuse (`pcall(42)`) is itself catchable.
+- There is no `finally`: undo work yourself after looking at `ok`.
+
+`error(x)` now takes any value, not only a string — `error(404)` and
+`error({"code": 404})` render into the message rather than being replaced by
+a complaint about the argument's type.
+
+**Implementation:** `fn_pcall` in `src/c_funcs.c`,
+`fh_unwind_vm_call_stack()` in `src/vm.c`.
+
+**Files Modified:** `src/c_funcs.c`, `src/vm.c`, `src/vm.h`, `src/program.c`,
+`src/fh_internal.h`, `src/gc.c`
 
 ---
 

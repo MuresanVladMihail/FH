@@ -84,6 +84,24 @@ The language follows a classic interpreter architecture:
 - Generates specialized opcodes when types are known (e.g., OPC_ADDI for int+int, OPC_ADDF for float+float)
 - Recent optimization work focused on prefix/postfix increment/decrement operators
 
+**Error handling**
+- Errors are return codes, not `longjmp`: `fh_set_error()` fills
+  `prog->last_error_msg`, returns -1, and every layer propagates the -1.
+  `fh_run_vm()` returns -1 with the failed call's frames still on the stack,
+  which is what makes the traceback in `fh_get_error()` possible.
+- `pcall()` (`fn_pcall` in `src/c_funcs.c`) is built on exactly that: it
+  records the call-stack depth, runs the call, and on -1 reads the message and
+  location, renders the traceback, then puts the VM back with
+  `fh_unwind_vm_call_stack()`. Two things are easy to forget when touching it:
+  `fh_set_error()` also clears the global `fh_running`, which several builtins
+  read as "an argument conversion failed", and the value the call returned
+  sits in a stack slot the collector no longer walks — hence the GC pause
+  while the result map is assembled.
+- A C function that calls back into the script runs with a **C-call frame**
+  (`closure == NULL`) on top. Anything deriving a register window from
+  `frame->closure` has to handle that; `stack_top` is the bound that is right
+  for both frame kinds.
+
 **Standard Library** (`src/c_funcs.c`, `src/functions.c`)
 - Built-in functions exposed to scripts
 - Crypto: bcrypt, md5 hashing (`src/crypto/`)

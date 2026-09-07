@@ -378,11 +378,15 @@ int fh_call_vm_function(struct fh_vm *vm, struct fh_closure *closure,
     if (n_args > fh_func_def->n_params)
         n_args = fh_func_def->n_params;
 
+    /* The new frame's register window starts above everything the frame it
+     * nests inside is using. stack_top is the right bound for both kinds of
+     * frame: a bytecode frame sets it to base + n_regs, and a C-call frame --
+     * which is exactly what is on top when a C function calls back into the
+     * script, as pcall() does -- sets it to base + n_args. Deriving it from
+     * prev_frame->closure instead fell back to register 0 for the C-call case
+     * and overwrote the outermost function's registers. */
     struct fh_vm_call_frame *prev_frame = call_frame_stack_top(&vm->call_stack);
-    int ret_reg = 0;
-    if (prev_frame && prev_frame->closure) {
-        ret_reg = prev_frame->base + prev_frame->closure->func_def->n_regs;
-    }
+    int ret_reg = prev_frame ? prev_frame->stack_top : 0;
 
     ensure_stack_size(vm, ret_reg + n_args + 1);
 
@@ -574,6 +578,27 @@ static void dump_state(struct fh_vm *vm) {
     int addr = (frame) ? vm->pc - 1 - frame->closure->func_def->code : -1;
     fh_dump_bc_instr(vm->prog, addr, vm->pc[-1]);
     printf("----------------------------\n");
+}
+
+/* Drop every call frame above `depth`, as pcall() does when the call it was
+ * protecting failed. The value stack itself is not shrunk -- nothing reads it
+ * above the frames that are left -- but an upvalue still pointing into an
+ * abandoned frame has to be closed, or it would alias whatever reuses those
+ * slots next. open_upvals is ordered highest address first, the same order
+ * op_RET closes them in. */
+void fh_unwind_vm_call_stack(struct fh_vm *vm, int depth) {
+    const int size = call_frame_stack_size(&vm->call_stack);
+    if (depth < 0 || depth >= size)
+        return;
+
+    const struct fh_vm_call_frame *first_dead = call_frame_stack_item(&vm->call_stack, depth);
+    if (first_dead) {
+        const struct fh_value *limit = vm->stack + first_dead->base;
+        while (vm->open_upvals && vm->open_upvals->val >= limit)
+            close_upval(vm);
+    }
+
+    call_frame_stack_set_size(&vm->call_stack, depth);
 }
 
 static void save_error_loc(struct fh_vm *vm) {
@@ -1273,9 +1298,17 @@ op_ADD: {
                                                rc->data.b != 0 ? "true" : "false");
                     DISPATCH();
                 }
+                /* "null", the same word print() and json_stringify() use.
+                 * Reporting a value that may or may not be there -- an error
+                 * field, a missing map key -- is the whole reason people
+                 * build strings this way. */
+                case FH_VAL_NULL: {
+                    *ra = fh_add_string_string(vm->prog, GET_OBJ_STRING_DATA(GET_VAL_STRING(rb)), "null");
+                    DISPATCH();
+                }
                 default: {
                     vm_error(vm, "string addition with unsupported type %s", fh_type_to_str(vm->prog, rc->type));
-                    DISPATCH();
+                    goto user_err;
                 }
             }
         }
@@ -1297,10 +1330,14 @@ op_ADD: {
                     *ra = fh_add_integer_string(vm->prog, rb->data.i,GET_VAL_STRING(rc));
                     DISPATCH();
                 }
+                case FH_VAL_NULL: {
+                    *ra = fh_add_string_string(vm->prog, "null", GET_OBJ_STRING_DATA(GET_VAL_STRING(rc)));
+                    DISPATCH();
+                }
                 default: {
                     vm_error(vm, "%s addition with unsupported type %s", fh_type_to_str(vm->prog, rb->type),
                              fh_type_to_str(vm->prog, rc->type));
-                    DISPATCH();
+                    goto user_err;
                 }
             }
         }
@@ -1487,15 +1524,28 @@ op_CALL: {
             // stack may have moved
             stack = vm->stack;
 
+            /* The return slot is an *index*, and the value is written back
+             * afterwards rather than through a pointer into the stack: a C
+             * function that calls back into the script grows the value stack,
+             * which reallocs it, and the pointer we handed out would then be
+             * to freed memory. pcall() is the first C function that does
+             * this, but it will not be the last. */
+            const int ret_slot = new_frame->base - 1;
+            struct fh_value c_ret;
+            c_ret.type = FH_VAL_NULL;
+            c_ret.data.obj = NULL;
+
             int r = ra->data.c_func(
                 vm->prog,
-                stack + new_frame->base - 1,
+                &c_ret,
                 stack + new_frame->base,
                 (int) rb_i
             );
 
             call_frame_stack_pop(&vm->call_stack, NULL);
             if (r < 0) goto user_err;
+
+            vm->stack[ret_slot] = c_ret;
 
             // still in same bytecode function after C call
             goto rebind_frame;

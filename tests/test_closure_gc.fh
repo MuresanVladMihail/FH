@@ -1,0 +1,69 @@
+
+# A closed upvalue must not be walked as if it were still open.
+#
+# struct fh_upval keeps `next` (the open-upvalue chain) and `storage` (the
+# value) in the same union. The collector used to follow `next` whatever the
+# state, so once a frame returned and its upvalue was closed over a number or
+# a bool, the next collection dereferenced the value's type tag.
+
+fn make_counter() {
+    let n = 0;
+    return fn() { n = n + 1; return n; };
+}
+
+fn make_flag() {
+    let on = false;
+    return fn() { on = !on; return on; };
+}
+
+fn make_holder(v) {
+    return fn() { return v; };
+}
+
+fn main() {
+    let c = make_counter();
+    assert(c() == 1);
+    assert(c() == 2);
+
+    gc();                          # used to segfault right here
+    assert(c() == 3);
+
+    let f = make_flag();
+    assert(f() == true);
+    gc();
+    assert(f() == false);
+
+    # every value kind, closed over and then collected
+    let holders = [make_holder(7), make_holder(1.5), make_holder("s"),
+                   make_holder(true), make_holder(null), make_holder([1, 2]),
+                   make_holder({"k": "v"})];
+    gc();
+    assert(holders[0]() == 7);
+    assert(holders[2]() == "s");
+    assert(holders[4]() == null);
+    assert(len(holders[5]()) == 2);
+    assert(holders[6]().k == "v");
+
+    # many of them, with collections in between
+    let counters = [];
+    for (let i = 0; i < 200; i++) {
+        append(counters, make_counter());
+        if (i % 25 == 0) { gc(); }
+    }
+    gc();
+    let total = 0;
+    for (let i = 0; i < len(counters); i++) { total = total + counters[i](); }
+    assert(total == 200);
+
+    # two closures sharing one upvalue, still shared after a collection
+    let shared_n = 0;
+    let inc = fn() { shared_n = shared_n + 1; return shared_n; };
+    let get = fn() { return shared_n; };
+    inc(); inc();
+    gc();
+    assert(get() == 2);
+    assert(inc() == 3);
+    assert(get() == 3);
+
+    print("ok\n");
+}

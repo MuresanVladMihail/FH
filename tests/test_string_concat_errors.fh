@@ -1,0 +1,44 @@
+
+# Adding a string to something that is not one.
+#
+# The two "unsupported type" branches raised the error and then carried on to
+# the next instruction, leaving the destination register holding whatever was
+# in it before. The error surfaced later, pointing at an innocent line, and
+# until then the expression quietly evaluated to garbage -- which is exactly
+# what `"failed: " + err` does when err is null.
+
+fn main() {
+    # null reads as the word print() and json_stringify() use
+    assert("A" + null == "Anull");
+    assert(null + "B" == "nullB");
+    assert("A" + null + "C" == "AnullC");
+
+    let m = {"a": true, "b": 42, "c": null, "d": 1.5};
+    assert("a=" + m.a + " b=" + m.b + " c=" + m.c == "a=true b=42 c=null");
+    assert("d=" + m.d == "d=1.5");
+
+    # a type that really has no text form is an error, raised where it happens
+    let bad = pcall(fn() { return "x" + [1, 2]; });
+    assert(bad.ok == false);
+    assert(bad.error == "string addition with unsupported type array");
+    assert(bad.line == 21);          # the line it is written on, not a later one
+
+    let bad2 = pcall(fn() { return {"k": 1} + "x"; });
+    assert(bad2.ok == false);
+
+    # and the expression does not go on to produce a value
+    let bad3 = pcall(fn() {
+        let s = "start";
+        s = s + [1];
+        return s;
+    });
+    assert(bad3.ok == false);
+
+    # arithmetic with null is an error, and it is reported where it happens
+    let bad4 = pcall(fn() { let n = null; return 1 + n; });
+    assert(bad4.ok == false);
+    assert(bad4.error == "can't add integer and null");
+    assert(bad4.line == 38);
+
+    print("ok\n");
+}

@@ -42,4 +42,8 @@ int fh_call_vm_function(struct fh_vm *vm, struct fh_closure *closure,
 
 int fh_run_vm(struct fh_vm *vm);
 
+/* Drops every call frame above `depth` and closes the upvalues that pointed
+ * into them. Used to recover from a failed call -- see pcall(). */
+void fh_unwind_vm_call_stack(struct fh_vm *vm, int depth);
+
 #endif /* VM_H_FILE */

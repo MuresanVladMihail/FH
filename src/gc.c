@@ -202,10 +202,14 @@ static void mark_closure_children(struct fh_gc_state *gc, struct fh_closure *clo
 
 static void mark_upval_children(struct fh_gc_state *gc, struct fh_upval *upval) {
     MARK_VALUE(gc, upval->val);
-    // if (upval->val != &upval->data.storage && upval->data.next != NULL) {
-    //     MARK_OBJECT(gc, upval->data.next);
-    // }
-    if (upval->data.next) {
+
+    /* `data` is a union: `next` (the open-upvalue chain) while the upvalue is
+     * open, `storage` (the value itself) once it has been closed. Following
+     * `next` unconditionally reinterpreted a closed upvalue's *value* as a
+     * pointer -- for a number or a bool that is the type tag, so the collector
+     * dereferenced 0xa and died. Any counter-style closure whose frame had
+     * returned crashed the next collection. */
+    if (upval->val != &upval->data.storage && upval->data.next != NULL) {
         MARK_OBJECT(gc, upval->data.next);
     }
 }
