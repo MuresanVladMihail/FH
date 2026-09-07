@@ -454,7 +454,7 @@ int fh_compile_pack(struct fh_program *prog, const char *path, bool is_mandatory
         if (is_mandatory) {
             fh_set_error(prog, "can't open '%s' from pack", path);
         } else {
-            fprintf(stderr, "warning: can't open '%s' from pack", path);
+            fprintf(stderr, "warning: can't open '%s' from pack\n", path);
         }
         return -1;
     }
@@ -467,7 +467,7 @@ int fh_compile_file(struct fh_program *prog, const char *filename, bool is_manda
         if (is_mandatory) {
             fh_set_error(prog, "can't open '%s'", filename);
         } else {
-            fprintf(stderr, "warning: can't open '%s'", filename);
+            fprintf(stderr, "warning: can't open '%s'\n", filename);
         }
         return -1;
     }
