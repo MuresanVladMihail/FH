@@ -1,0 +1,146 @@
+
+# pcall(): calling something that might fail, and coming back either way.
+
+fn add(a, b) { return a + b; }
+fn mul(a, b) { return a * b; }
+fn boom(what) { error("boom: " + what); }
+fn deep(n) { if (n == 0) { error("bottom"); } return deep(n - 1); }
+
+fn make_counter() {
+    let n = 0;
+    return fn() { n = n + 1; return n; };
+}
+
+# An error raised while this frame holds an open upvalue: the frame is
+# abandoned, so the upvalue has to be closed on the way out or it would alias
+# whatever reuses those stack slots next.
+fn dies_with_an_open_upvalue() {
+    let captured = 7;
+    let f = fn() { return captured; };
+    error("dying with f still holding captured");
+}
+
+fn main() {
+    # --- the happy path ---
+    let r = pcall(mul, 6, 7);
+    assert(r.ok == true);
+    assert(r.value == 42);
+    assert(r.error == null);
+
+    # --- the caught path ---
+    let e = pcall(boom, "one");
+    assert(e.ok == false);
+    assert(e.value == null);
+    assert(e.error == "boom: one");
+    assert(len(e.file) > 0);
+    assert(e.line > 0);
+    assert(len(e.traceback) > 0);
+
+    # and the program is still standing
+    assert(add(1, 2) == 3);
+
+    # --- registers survive the call ---
+    # pcall runs the VM from inside a C frame; deriving the callee's register
+    # window from that frame's closure (there isn't one) used to restart at
+    # register 0 and overwrite main's locals.
+    let sentinel = 12345;
+    let sentinel_str = "untouched";
+    let d = pcall(deep, 40);
+    assert(d.ok == false);
+    assert(d.error == "bottom");
+    assert(sentinel == 12345);
+    assert(sentinel_str == "untouched");
+
+    # --- an anonymous function, which is how you protect an expression ---
+    let a = pcall(fn() { return "x" + [1, 2]; });
+    assert(a.ok == false);
+    assert(a.error == "string addition with unsupported type array");
+
+    # --- nested ---
+    let n = pcall(fn() {
+        let inner = pcall(boom, "inner");
+        assert(inner.ok == false);
+        return "outer survived";
+    });
+    assert(n.ok == true);
+    assert(n.value == "outer survived");
+
+    # --- an error thrown *past* a successful inner pcall ---
+    let m = pcall(fn() {
+        let good = pcall(add, 1, 1);
+        assert(good.value == 2);
+        error("thrown after the inner one succeeded");
+        return "unreachable";
+    });
+    assert(m.ok == false);
+    assert(m.error == "thrown after the inner one succeeded");
+
+    # --- a C function that fails is caught the same way ---
+    let c = pcall(math_sqrt, "not a number");
+    assert(c.ok == false);
+    assert(len(c.error) > 0);
+
+    # --- more arguments than pcall keeps inline ---
+    let many = pcall(fn(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10) {
+        return a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10;
+    }, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+    assert(many.ok == true);
+    assert(many.value == 55);
+
+    # --- open upvalues in an abandoned frame ---
+    let u = pcall(dies_with_an_open_upvalue);
+    assert(u.ok == false);
+
+    let counter = make_counter();
+    assert(counter() == 1);
+    assert(counter() == 2);
+
+    let u2 = pcall(dies_with_an_open_upvalue);
+    assert(u2.ok == false);
+    assert(counter() == 3);          # the counter's own upvalue is intact
+
+    # --- the value pcall hands back is a real, live object ---
+    let obj = pcall(fn() { return {"a": [1, 2, 3], "b": "kept"}; });
+    gc();
+    assert(obj.value.b == "kept");
+    assert(len(obj.value.a) == 3);
+
+    # --- a lot of caught errors do not leak or confuse the collector ---
+    let caught = 0;
+    for (let i = 0; i < 300; i++) {
+        let x = pcall(boom, "" + i);
+        if (!x.ok) { caught = caught + 1; }
+        if (i % 50 == 0) { gc(); }
+    }
+    assert(caught == 300);
+    assert(add(4, 4) == 8);
+
+    # --- a call deep enough to move the value stack ---
+    # The VM grows its stack in chunks and reallocs it. pcall is the first C
+    # function that makes that happen while it is itself running, so anything
+    # the VM handed it as a pointer into that stack -- its arguments, and the
+    # slot its own return value goes in -- is stale by the time it comes back.
+    let deep_ok = pcall(fn(n) {
+        let f = fn(k, self) { if (k <= 0) { return "reached the bottom"; } return self(k - 1, self); };
+        return f(n, f);
+    }, 3000);
+    assert(deep_ok.ok == true);
+    assert(deep_ok.value == "reached the bottom");
+
+    # the same, but failing at the bottom of the deep stack
+    let deep_bad = pcall(deep, 3000);
+    assert(deep_bad.ok == false);
+    assert(deep_bad.error == "bottom");
+    assert(sentinel == 12345);
+
+    # --- error() carries a non-string through too ---
+    let ne = pcall(fn() { error(404); });
+    assert(ne.ok == false);
+    assert(len(ne.error) > 0);
+
+    # --- pcall's own misuse is an error like any other, and catchable ---
+    let bad = pcall(pcall, 42);
+    assert(bad.ok == false);
+
+    print("ok\n");
+}

@@ -89,6 +89,18 @@ Optional index: ?.[...]   (see 1.9)
 
 There is no ternary `?:` operator.
 
+When one side of `+` is a string, the other is rendered into it: a number,
+a boolean (`"true"` / `"false"`) or `null` (`"null"`, the same word `print`
+and `json_stringify` use). Anything else — an array, a map, a closure — is
+an error, because there is no sensible text for it:
+
+```
+"n = " + 3          # "n = 3"
+"ok? " + false      # "ok? false"
+"err: " + null      # "err: null"     <- what a missing field reads as
+"x" + [1, 2]        # error: string addition with unsupported type array
+```
+
 ### 1.5 Control flow
 
 ```
@@ -219,6 +231,47 @@ Traceback (most recent call last):
   File "file.fh", line 20, in process_data
   File "file.fh", line 5, in divide
 ```
+
+`error(x)` takes any value, not only a string: `error(404)` and
+`error({"code": 404})` render the value into the message.
+
+**Catching one — `pcall(f [, args...])`.** FH has no `try`/`catch`. What it
+has is a protected call: `pcall` runs `f` and comes back either way, so a
+failure costs you that one call instead of the program.
+
+```
+let r = pcall(load_level, "level3.json");
+if (r.ok) {
+    start(r.value);
+} else {
+    println("could not load the level: " + r.error);
+    start(default_level());
+}
+```
+
+It always returns a map, and `ok` says which shape it is:
+
+| Key | On success | On failure |
+|---|---|---|
+| `ok` | `true` | `false` |
+| `value` | what `f` returned | `null` |
+| `error` | `null` | the message, as a string |
+| `file`, `line`, `col` | absent | where it was raised |
+| `traceback` | absent | the same stack trace the interpreter would have printed |
+
+Notes:
+
+- `f` may be a named function, an anonymous one, or a **C function** the host
+  registered — a binding that fails is caught exactly like a script error,
+  which is the case that matters when FH is embedded in an engine.
+- To protect an *expression* rather than a call, wrap it:
+  `pcall(fn() { return risky() + 1; })`.
+- `pcall` nests. An inner `pcall` that catches something does not stop an
+  outer one from catching what happens next.
+- Errors in `pcall`'s own arguments — `pcall(42)` — are ordinary errors, and
+  are themselves catchable by an outer `pcall`.
+- There is no `finally`. Anything that has to be undone has to be undone by
+  the caller, after looking at `ok`.
 
 ### 1.11 Multi-file scripts
 
@@ -432,7 +485,8 @@ len("hello");        # 5
 | `reserve(container, capacity)` | Pre-allocates capacity in an array or map and returns it. |
 | `docstring(fn)` | Returns the docstring of a closure (`fn f() : "doc" {}`), or `""` if it has none. Only works on closures. |
 | `getversion()` | Returns the FH version string (e.g. `"1.0.rc6"`). |
-| `error(msg)` | Aborts the script with error message `msg` (string). |
+| `error(x)` | Aborts the script with `x` as the message. A string is used as-is; any other value is rendered into one. |
+| `pcall(f[, args...])` | Calls `f` with `args`, catching an error instead of aborting. Returns a map: `{ok: true, value: ...}` or `{ok: false, error: "...", file, line, col, traceback}`. See 1.10. |
 | `assert(cond[, msg])` | Raises an error if `cond` is falsy; `msg` is included in the error if given. |
 | `print(...)` | Prints any number of values with no separators or trailing newline. |
 | `println(...)` | Like `print`, but appends the caller's source location and a newline. |

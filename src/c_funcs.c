@@ -2414,9 +2414,160 @@ static int fn_error(struct fh_program *prog, struct fh_value *ret, struct fh_val
         return -1;
 
     const char *str = GET_VAL_STRING_DATA(&args[0]);
-    if (!str)
-        return fh_set_error(prog, "error(): argument 1 must be a string");
-    return fh_set_error(prog, "%s", str);
+    if (str)
+        return fh_set_error(prog, "%s", str);
+
+    /* error(42), error(["a", "b"]): render whatever it was. Replacing the
+     * message the caller meant with a complaint about its type loses the only
+     * thing they were trying to say. */
+    char buf[256];
+    fh_value_repr(prog, &args[0], buf, sizeof(buf));
+    return fh_set_error(prog, "%s", buf);
+}
+
+/* pcall(f [, args...]) -- call f, and come back with the error instead of dying.
+ *
+ * FH has no try/catch and no unwinding: an error is a -1 all the way up, so
+ * every failure -- a missing file in a binding, an index into a null, an
+ * error() the script raised on purpose -- kills the program. That is fine for
+ * a script and useless for a game, which wants to fail one level and carry on.
+ *
+ * It returns a map, always with the same three keys:
+ *
+ *     { ok: true,  value: <what f returned>, error: null }
+ *     { ok: false, value: null, error: "<message>",
+ *       file: "...", line: n, col: n, traceback: "..." }
+ *
+ * so the reading side is `let r = pcall(load_level, 3); if (r.ok) {...}`.
+ *
+ * f may be a script function or a C function: a binding that returns -1 is
+ * caught the same way, which is the case that matters when the host is an
+ * engine.
+ */
+static int fn_pcall(struct fh_program *prog, struct fh_value *ret,
+                    struct fh_value *args, int n_args) {
+    if (n_args < 1)
+        return fh_set_error(prog, "pcall(): expected at least 1 argument (the function to call)");
+
+    const bool is_closure = (args[0].type == FH_VAL_CLOSURE);
+    const bool is_c_func  = (args[0].type == FH_VAL_C_FUNC);
+    if (!is_closure && !is_c_func)
+        return fh_set_error(prog, "pcall(): argument 1 must be a function, got %s",
+                            fh_type_to_str(prog, args[0].type));
+
+    struct fh_vm *vm = &prog->vm;
+    const int n_call_args = n_args - 1;
+
+    /* args[] points into the VM's value stack, which the call below may
+     * realloc -- so take a copy before it can move underneath us. */
+    struct fh_value inline_args[8];
+    struct fh_value *call_args = inline_args;
+    if (n_call_args > (int) (sizeof(inline_args) / sizeof(inline_args[0]))) {
+        call_args = malloc(sizeof(struct fh_value) * (size_t) n_call_args);
+        if (!call_args)
+            return fh_set_error(prog, "pcall(): out of memory");
+    }
+    if (n_call_args > 0)
+        memcpy(call_args, &args[1], sizeof(struct fh_value) * (size_t) n_call_args);
+
+    const int base_depth = call_frame_stack_size(&vm->call_stack);
+    uint32_t *saved_pc = vm->pc;
+
+    struct fh_value call_ret = fh_new_null();
+    int r;
+    if (is_closure) {
+        r = fh_call_vm_function(vm, GET_OBJ_CLOSURE(args[0].data.obj),
+                                call_args, n_call_args, &call_ret);
+    } else {
+        r = args[0].data.c_func(prog, &call_ret, call_args, n_call_args);
+    }
+
+    if (call_args != inline_args)
+        free(call_args);
+
+    vm->pc = saved_pc;
+
+    /* Everything the failed call left behind, read before it is thrown away:
+     * fh_get_error() renders the traceback from the frames that are still on
+     * the stack, and it overwrites last_error_msg with what it rendered, so
+     * the raw message has to be copied out first. */
+    char message[sizeof(prog->last_error_msg)] = "";
+    char traceback[2048] = "";
+    const char *file = NULL;
+    int line = 0, col = 0;
+
+    if (r < 0) {
+        snprintf(message, sizeof(message), "%s", prog->last_error_msg);
+
+        if (vm->last_error_addr >= 0) {
+            const struct fh_src_loc *loc = &vm->last_error_loc;
+            file = fh_get_symbol_name(&prog->src_file_names, loc->file_id);
+            line = loc->line;
+            col = loc->col;
+        }
+        snprintf(traceback, sizeof(traceback), "%s", fh_get_error(prog));
+
+        fh_unwind_vm_call_stack(vm, base_depth);
+
+        /* Put the program back the way pcall found it: the error is handled
+         * now, and fh_set_error() clears fh_running, which several builtins
+         * read as "an argument conversion failed". */
+        prog->last_error_msg[0] = '\0';
+        vm->last_error_addr = -1;
+        vm->last_error_frame_index = -1;
+        vm->last_error_loc = fh_make_src_loc(0, 0, 0);
+        fh_running = true;
+    }
+
+    /* Assembling the result allocates a map and a few strings, and call_ret
+     * lives in a stack slot the GC no longer walks, so hold the collector off
+     * for the handful of allocations rather than pinning each one. */
+    const bool was_paused = prog->gc_isPaused;
+    const int pin_state = fh_get_pin_state(prog);
+    prog->gc_isPaused = true;
+
+    struct fh_map *map = fh_make_map(prog, true);
+    int failed = (map == NULL);
+    if (!failed)
+        failed = (fh_alloc_map_object_len(prog, map, 8) < 0);
+
+    if (!failed) {
+        struct fh_value key;
+
+#define PCALL_PUT(k, v) do {                                              \
+            key = fh_new_string(prog, (k));                               \
+            struct fh_value tmp_val = (v);                                \
+            if (fh_add_map_object_entry(prog, map, &key, &tmp_val) < 0) { \
+                failed = 1;                                               \
+                goto pcall_done;                                          \
+            }                                                             \
+        } while (0)
+
+        PCALL_PUT("ok", fh_new_bool(r >= 0));
+        PCALL_PUT("value", (r >= 0) ? call_ret : fh_new_null());
+        PCALL_PUT("error", (r >= 0) ? fh_new_null() : fh_new_string(prog, message));
+
+        if (r < 0) {
+            PCALL_PUT("file", file ? fh_new_string(prog, file) : fh_new_null());
+            PCALL_PUT("line", fh_new_integer(line));
+            PCALL_PUT("col", fh_new_integer(col));
+            PCALL_PUT("traceback", fh_new_string(prog, traceback));
+        }
+#undef PCALL_PUT
+    }
+
+pcall_done:
+    prog->gc_isPaused = was_paused;
+
+    if (failed) {
+        fh_restore_pin_state(prog, pin_state);
+        return fh_set_error(prog, "pcall(): out of memory");
+    }
+
+    ret->type = FH_VAL_MAP;
+    ret->data.obj = (union fh_object *) map;
+    fh_restore_pin_state(prog, pin_state);
+    return 0;
 }
 
 static int fn_delete(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
@@ -2778,6 +2929,7 @@ const struct fh_named_c_func fh_std_c_funcs[] = {
     DEF_FN(type),
     DEF_FN(docstring),
     DEF_FN(error),
+    DEF_FN(pcall),
     DEF_FN(assert),
     DEF_FN(print),
     DEF_FN(println),
