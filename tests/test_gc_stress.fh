@@ -1,0 +1,348 @@
+#-
+GC torture.
+
+The collector is the one place where a mistake shows up as a segfault
+somewhere else entirely, so this file leans on it from every direction:
+values live in registers while builtins allocate, closures outlive their
+frames, structures point at themselves, C functions call back into the VM,
+and collections are forced in the middle of all of it.
+
+Two regressions this pins down, both of which used to crash:
+
+ 1. mark_roots() marked the VM stack only up to the *top* frame's
+    stack_top. A C-call frame's stack_top is base + n_args, which for a
+    no-argument builtin sits below every register its caller is still
+    using -- so a collection triggered from inside any allocating builtin
+    freed the caller's live locals, and the stale slots crashed the next
+    collection. The bound is now the highest stack_top of any live frame.
+
+ 2. `a[i] = v` past the end grew the array *by* i+1 instead of *to* i+1,
+    so len() lied and the array grew geometrically.
+-#
+
+fn is_str(v) { return type(v) == "string"; }
+
+fn test_locals_survive_builtin_allocation() {
+    #- No explicit gc() anywhere: the collections come from fh_make_object()
+       inside ordinary builtins, while a C-call frame is on top. -#
+    gc_frequency(512);
+
+    let anchor_str  = "anchor-string";
+    let anchor_arr  = ["a", "b", "c"];
+    let anchor_map  = {"k": "v", "nested": {"deep": [1, 2, 3]}};
+    let anchor_fn   = fn(x) { return x + 1; };
+
+    let i = 0;
+    while (i < 4000) {
+        let tmp = string_upper("churn " + i);
+        let tmp2 = string_rep("x", 3);
+        let tmp3 = string_split("a,b,c", ",");
+        i = i + 1;
+    }
+
+    assert(anchor_str == "anchor-string");
+    assert(anchor_arr[2] == "c");
+    assert(len(anchor_arr) == 3);
+    assert(anchor_map.k == "v");
+    assert(anchor_map.nested.deep[2] == 3);
+    assert(anchor_fn(41) == 42);
+
+    gc_frequency(1000000);
+}
+
+fn churn_then_collect() {
+    #- Shape matters here, and this shape is the regression.
+
+       The map literal leaves its temporaries in registers well above where
+       the `gc()` call below allocates its own. With the old bound, the
+       collection that gc() triggers ran with the C-call frame on top --
+       stack_top = ret_reg + 1, below those registers -- so their objects
+       were swept while the slots still pointed at them. The *next*
+       collection, running with a taller frame on top, then walked those
+       slots and marked freed objects, which the collector reports as
+       "GC ERROR: marking invalid object type" on its way to a segfault.
+
+       Nothing is asserted inside the loop on purpose: an extra call there
+       shifts register allocation and the shape stops reproducing. -#
+    let junk = [];
+    let i = 0;
+    while (i < 3000) {
+        append(junk, {"a": "str" + i, "b": [i, i + 1]});
+        if ((i % 100) == 0) { junk = []; gc(); }
+        i = i + 1;
+    }
+    return len(junk);
+}
+
+fn test_churn_with_explicit_collections() {
+    gc_frequency(512);
+
+    let keep = {"tag": "keeper"};
+    let n = churn_then_collect();
+    assert(n >= 0);
+
+    assert(keep.tag == "keeper");
+    gc();
+    assert(keep.tag == "keeper");
+    gc_frequency(1000000);
+}
+
+fn make_adder(n) {
+    let extra = [n, n * 2];
+    return fn(x) { return x + n + extra[1]; };
+}
+
+fn counter() {
+    let n = 0;
+    return [fn() { n = n + 1; return n; }, fn() { return n; }];
+}
+
+fn test_closures_outlive_their_frames() {
+    gc_frequency(512);
+
+    let fns = [];
+    let i = 0;
+    while (i < 400) { append(fns, make_adder(i)); i = i + 1; }
+    gc();
+    gc();
+
+    i = 0;
+    while (i < 400) {
+        assert(fns[i](0) == i + i * 2);
+        i = i + 1;
+    }
+
+    # a shared, still-mutable upvalue after its frame returned
+    let cs = [];
+    i = 0;
+    while (i < 200) { append(cs, counter()); i = i + 1; }
+    gc();
+
+    i = 0;
+    while (i < 200) {
+        let c = cs[i];
+        c[0](); c[0](); c[0]();
+        assert(c[1]() == 3);
+        i = i + 1;
+    }
+
+    gc_frequency(1000000);
+}
+
+fn deep(n) {
+    let local = {"n": n, "pad": [n, n, n, n]};
+    if (n <= 0) { return 0; }
+    let r = local.n + deep(n - 1);
+    assert(local.n == n);          # the frame was not clobbered
+    return r;
+}
+
+fn test_deep_recursion() {
+    gc_frequency(512);
+    let i = 0;
+    while (i < 15) {
+        assert(deep(200) == 20100);
+        i = i + 1;
+    }
+    gc_frequency(1000000);
+}
+
+fn test_maps_under_pressure() {
+    gc_frequency(512);
+
+    let m = {};
+    let i = 0;
+    while (i < 1500) { m["key-" + i] = {"v": i, "arr": [i, i + 1]}; i = i + 1; }
+    gc();
+    assert(len(m) == 1500);
+
+    # iterate while allocating on every step
+    let k = next_key(m, null);
+    let count = 0;
+    let sum = 0;
+    while (k != null) {
+        let junk = "tmp" + count;
+        sum = sum + m[k].v;
+        count = count + 1;
+        k = next_key(m, k);
+    }
+    assert(count == 1500);
+    assert(sum == 1124250);
+
+    i = 0;
+    while (i < 1500) { if ((i % 2) == 0) { delete(m, "key-" + i); } i = i + 1; }
+    gc();
+    gc();
+    assert(len(m) == 750);
+    assert(m["key-1"].arr[1] == 2);
+
+    gc_frequency(1000000);
+}
+
+fn test_array_growth() {
+    # writing past the end extends the array to exactly index+1
+    let a = [1, 2, 3];
+    a[3] = 4;
+    assert(len(a) == 4);
+    assert(a[3] == 4);
+
+    a[10] = 99;
+    assert(len(a) == 11);
+    assert(a[10] == 99);
+    assert(a[5] == null);       # the gap is filled with nulls, not garbage
+
+    # the documented push idiom must not grow the array geometrically
+    let items = [];
+    let count = 0;
+    let i = 0;
+    while (i < 300) {
+        items[count] = {"i": i};
+        count = count + 1;
+        i = i + 1;
+    }
+    assert(len(items) == 300);
+    assert(count == 300);
+    assert(items[299].i == 299);
+
+    gc_frequency(512);
+    let b = [];
+    i = 0;
+    while (i < 400) { b[i] = {"i": i}; i = i + 1; }
+    gc();
+    assert(len(b) == 400);
+    assert(b[399].i == 399);
+
+    reset(b);
+    gc();
+    assert(len(b) == 0);
+
+    let c = reserve([], 500);
+    i = 0;
+    while (i < 500) { append(c, "s" + i); i = i + 1; }
+    gc();
+    assert(len(c) == 500);
+    assert(c[499] == "s499");
+    gc_frequency(1000000);
+}
+
+fn test_cycles() {
+    gc_frequency(512);
+
+    # unreachable cycles must be collected without confusing the marker
+    let i = 0;
+    while (i < 300) {
+        let node = {"id": i};
+        node.self = node;
+        let other = {"peer": node};
+        node.peer = other;
+        let arr = [node, other];
+        arr[0].list = arr;
+        i = i + 1;
+    }
+    gc();
+    gc();
+
+    # a reachable cycle must survive
+    let keep = {"id": -1};
+    keep.self = keep;
+    keep.arr = [keep];
+    gc();
+    assert(keep.self.self.self.id == -1);
+    assert(keep.arr[0].self.id == -1);
+
+    gc_frequency(1000000);
+}
+
+fn dies() {
+    let captured = ["a", "b", "c"];
+    let f = fn() { return captured[0]; };
+    return error("boom " + f());
+}
+
+fn test_pcall_under_pressure() {
+    gc_frequency(512);
+
+    let keep = ["hold", "this"];
+    let messages = [];
+    let i = 0;
+    while (i < 300) {
+        let r = pcall(dies);
+        assert(r.ok == false);
+        if ((i % 50) == 0) { append(messages, r.error); }
+        if ((i % 37) == 0) { gc(); }
+        i = i + 1;
+    }
+    gc();
+    gc();
+
+    assert(len(messages) == 6);
+    assert(messages[0] == "boom a");
+    assert(keep[1] == "this");
+
+    gc_frequency(1000000);
+}
+
+fn test_c_function_calling_back() {
+    #- sort() runs script from inside a C frame, which is exactly the shape
+       that used to under-mark the stack. -#
+    gc_frequency(512);
+
+    let anchor = {"tag": "anchor"};
+    let proto = {"key": fn(self) { return self.k; }};
+    let objs = [];
+    math_randomseed(3);
+    let i = 0;
+    while (i < 400) {
+        append(objs, setproto({"k": math_random(1, 1000000)}, proto));
+        i = i + 1;
+    }
+
+    sort(objs, fn(x, y) {
+        let junk = ["" + x:key(), "" + y:key(), {"t": x}];
+        return x:key() < y:key();
+    });
+
+    gc();
+    gc();
+
+    i = 1;
+    while (i < 400) {
+        assert(objs[i - 1]:key() <= objs[i]:key());
+        i = i + 1;
+    }
+    assert(anchor.tag == "anchor");
+
+    gc_frequency(1000000);
+}
+
+fn test_strings_under_pressure() {
+    gc_frequency(512);
+
+    let anchor_a = "ANCHOR-A";
+    let anchor_b = ["ANCHOR", "B"];
+    let i = 0;
+    while (i < 2000) {
+        let acc = string_upper("x" + i) + string_lower("Y") + string_rep("z", 2);
+        assert(string_find(acc, "X") == 0);
+        assert(is_str(acc));
+        i = i + 1;
+    }
+
+    assert(anchor_a == "ANCHOR-A");
+    assert(anchor_b[0] == "ANCHOR");
+    gc_frequency(1000000);
+}
+
+fn main() {
+    test_locals_survive_builtin_allocation();
+    test_churn_with_explicit_collections();
+    test_closures_outlive_their_frames();
+    test_deep_recursion();
+    test_maps_under_pressure();
+    test_array_growth();
+    test_cycles();
+    test_pcall_under_pressure();
+    test_c_function_calling_back();
+    test_strings_under_pressure();
+    print("ok\n");
+}

@@ -39,7 +39,7 @@ SRCS=$(patsubst %.o,%.c,$(OBJS))
 
 CHECK_SCRIPT = tests/test.fh
 
-# Possible inputs: debug, debug_dev, debug2, release, debug_san and asan.
+# Possible inputs: debug, debug_dev, debug2, release, debug_san, asan and gcdebug.
 # Note: leave no spaces behind or after the equal sign below
 TARGETS =release
 
@@ -73,6 +73,12 @@ ifeq ($(TARGETS), release)
 endif
 ifeq ($(TARGETS), asan)
 	CFLAGS += -fsanitize=address -fno-omit-frame-pointer -O -g -Wall -Wextra
+endif
+# asan plus the collector's root verifier: every GC checks that each root
+# still points at a live object, so a dangling root is reported where it is
+# introduced instead of crashing somewhere else, one run in five.
+ifeq ($(TARGETS), gcdebug)
+	CFLAGS += -fsanitize=address -fno-omit-frame-pointer -O1 -g -Wall -Wextra -DFH_GC_DEBUG
 endif
 
 all: build

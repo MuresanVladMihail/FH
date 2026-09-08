@@ -8,9 +8,21 @@
  */
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "pool.h"
 #include "program.h"
+
+/* In a gcdebug build, hand out and take back poisoned blocks. Recycled pool
+ * memory otherwise tends to contain the previous object's perfectly valid
+ * pointers, so a field an allocator forgot to initialise reads as something
+ * plausible and the bug hides. 0xAB bytes make it a wild pointer instead,
+ * which crashes at the first use. */
+#ifdef FH_GC_DEBUG
+#define POOL_POISON(p, n) memset((p), 0xAB, (n))
+#else
+#define POOL_POISON(p, n) ((void) 0)
+#endif
 
 static const size_t pool_class_size[FH_NUM_POOL_CLASSES] = {64, 128, 256, 512};
 
@@ -29,9 +41,13 @@ void *fh_pool_alloc(struct fh_program *prog, const size_t size) {
     void *p = prog->small_pool[c];
     if (p) {
         prog->small_pool[c] = *(void **) p;
+        POOL_POISON(p, pool_class_size[c]);
         return p;
     }
-    return malloc(pool_class_size[c]);
+    p = malloc(pool_class_size[c]);
+    if (p)
+        POOL_POISON(p, pool_class_size[c]);
+    return p;
 }
 
 void fh_pool_free(struct fh_program *prog, void *ptr, const size_t size) {
@@ -42,6 +58,7 @@ void fh_pool_free(struct fh_program *prog, void *ptr, const size_t size) {
         free(ptr);
         return;
     }
+    POOL_POISON(ptr, pool_class_size[c]);
     *(void **) ptr = prog->small_pool[c];
     prog->small_pool[c] = ptr;
 }

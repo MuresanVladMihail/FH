@@ -84,6 +84,7 @@ struct fh_program *fh_new_program(void) {
     prog->gc_live_bytes = 0;
     prog->gc_collect_at = 1000000;
     prog->gc_isPaused = false;
+    prog->gc_running = false;
     prog->alive_objects = 0;
     prog->objects = NULL;
     for (int i = 0; i < FH_NUM_POOL_CLASSES; i++)

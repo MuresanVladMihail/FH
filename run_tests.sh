@@ -26,7 +26,16 @@ run_test() {
 
     # Run the test (with timeout to prevent hangs)
     if output=$(./fh "$test_file" 2>&1); then
-        if echo "$output" | grep -qi "ok"; then
+        # The collector reports heap corruption on stderr and keeps going, so
+        # a test can print "ok" on a heap it has already trashed. Those two
+        # markers come only from the GC's own consistency checks
+        # ("GC ERROR: ..." in gc.c, "**** ERROR: ..." in fh_free_object) and
+        # always mean a real bug, never a script-level failure.
+        if echo "$output" | grep -q -e "GC ERROR" -e "\*\*\*\* ERROR"; then
+            printf "${RED}[FAIL]${NC} %s (collector reported heap corruption)\n" "$test_name"
+            echo "$output" | grep -e "GC ERROR" -e "\*\*\*\* ERROR" | sort -u | head -3 | sed 's/^/         /'
+            ((FAILED++))
+        elif echo "$output" | grep -qi "ok"; then
             printf "${GREEN}[PASS]${NC} %s\n" "$test_name"
             ((PASSED++))
         else
