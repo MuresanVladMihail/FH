@@ -323,6 +323,25 @@ static void mark_roots(struct fh_gc_state *gc, struct fh_program *prog) {
             MARK_VALUE(gc, &stack[i]);
     }
 
+    // mark the pending global initializer, if a chunk has been compiled but
+    // not yet run: nothing else references it until it is called
+    if (prog->globals_init)
+        MARK_OBJECT(gc, prog->globals_init);
+
+    // mark the closure of every live call frame. A closure being *executed*
+    // is normally reachable anyway -- a called function sits in the caller's
+    // register, and a named one is in global_funcs_map -- but
+    // fh_call_vm_function() puts its closure in the frame and nowhere else,
+    // so a caller holding no other reference to it (as running <globals>
+    // does) would otherwise have the running function's own constants
+    // collected under it.
+    debug_log("***** marking call frame closures\n");
+    for (int i = call_frame_stack_size(&prog->vm.call_stack) - 1; i >= 0; --i) {
+        const struct fh_vm_call_frame *f = call_frame_stack_item(&prog->vm.call_stack, i);
+        if (f && f->closure)
+            MARK_OBJECT(gc, f->closure);
+    }
+
     // mark open upvals
     debug_log("***** marking first open upval\n");
     if (prog->vm.open_upvals)

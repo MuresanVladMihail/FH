@@ -69,10 +69,42 @@ let nothing;        # implicitly null
 
 `let` inside a function creates a local, block-scoped variable. `let` at
 the top level of a script creates a global that every function in the
-script can read (see `tests/test_globals.fh`).
+script can read and write (see `tests/test_globals.fh`).
 
-By convention (not enforced by the language) an `ALL_CAPS` name signals
-"treat this as a constant" — FH has no dedicated `const` keyword.
+**A global initializer is ordinary code**, so it can be anything an
+expression can produce — including a call to one of the script's own
+functions, wherever in the file that function is declared:
+
+```
+let CONFIG  = load_config();          # a call
+let scale   = fn(x) { return x * 2; } # a closure
+let Actor   = {                       # a map holding functions
+    "tick": fn(self, dt) { self.t = self.t + dt; return self; }
+};
+let DOUBLE  = BASE * 2;               # another global, declared above
+```
+
+Two rules follow from how this runs. Every function in the file is compiled
+before any initializer runs, so an initializer may call a function declared
+further down. Initializers themselves run **top to bottom**, so a global may
+use one declared above it, and one declared *below* it still reads `null`:
+
+```
+let a = 1;
+let b = a + 1;      # 2
+let c = d;          # null -- d has not been initialized yet
+let d = 10;
+```
+
+They run when the chunk is loaded, before `main` (or any other entry point)
+is called. An error raised in one aborts loading, with a traceback naming
+`<globals>`.
+
+FH has no `const` keyword, but a name written in **nothing but capital
+letters** (`MAX`, `PI` — no digits, no underscores) is treated as a constant
+and cannot be reassigned; the parser rejects it at compile time. A name like
+`MAX_SIZE` or `LEVEL2` contains a character outside `A-Z`, so it is an
+ordinary variable despite reading like a constant.
 
 ### 1.4 Operators
 

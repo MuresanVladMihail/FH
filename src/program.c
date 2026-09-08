@@ -89,6 +89,7 @@ struct fh_program *fh_new_program(void) {
     for (int i = 0; i < FH_NUM_POOL_CLASSES; i++)
         prog->small_pool[i] = NULL;
     prog->null_value.type = FH_VAL_NULL;
+    prog->globals_init = NULL;
     prog->last_error_msg[0] = '\0';
     fh_init_symtab(&prog->src_file_names);
     named_c_func_stack_init(&prog->c_funcs);
@@ -445,6 +446,23 @@ int fh_compile_input(struct fh_program *prog, struct fh_input *in) {
     }
 
     fh_free_ast(ast);
+
+    /* Run the chunk's global initializers now, so every global holds its
+     * value before anything in the chunk can be called.
+     *
+     * The slot is cleared *after* the call, not before: while <globals> runs,
+     * this is the only thing referencing it, and an initializer that
+     * allocates enough to trigger a collection would otherwise have its own
+     * closure -- and the constants its bytecode reads -- swept out from under
+     * it. On failure the call frames are left standing, which is what
+     * fh_get_error() renders the traceback from. */
+    if (prog->globals_init) {
+        const int r = fh_call_vm_function(&prog->vm, prog->globals_init, NULL, 0, NULL);
+        if (r < 0)
+            return -1;
+        prog->globals_init = NULL;
+    }
+
     return 0;
 }
 
