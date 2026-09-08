@@ -1,6 +1,6 @@
 # New Features Implementation Summary
 
-## ✅ Completed Features (10/10)
+## ✅ Completed Features (11/11)
 
 ### 1. String Interpolation
 
@@ -316,6 +316,50 @@ around it. Measured on 50,000 objects with five methods: **2.2× less memory**
 
 ---
 
+### 11. Global initializers are real code
+
+A global used to be limited to whatever a compile-time evaluator could fold:
+a literal, or an array/map of literals. That ruled out most of what people
+actually write at file scope — and, awkwardly, the prototype from feature 10:
+
+```fh
+let Actor = {                                  # was: "map value must be
+    "tick": fn(self, dt) { ... }               #  constant expression"
+};
+let CONFIG = load_config();                    # was: rejected
+let DOUBLE = BASE * 2;                         # was: rejected
+```
+
+Each initializer is now compiled into one synthetic `<globals>` function that
+runs when the chunk is loaded, before `main`. The names are declared (as
+`null`) before anything is compiled, so functions and initializers alike
+resolve them; the function bodies are compiled before `<globals>` is, so an
+initializer may call any function in the file regardless of where it appears.
+Initializers run top to bottom, so a forward reference reads `null` rather
+than erroring, and a failure raises a normal error with a traceback naming
+`<globals>`.
+
+This replaced `eval_const_expr()` outright — ~120 lines of a second,
+weaker expression evaluator that could only ever disagree with the real one.
+
+Two GC roots were needed, and both are load-bearing (without them the test
+below segfaults):
+
+- `prog->globals_init` holds the compiled `<globals>` closure between
+  compiling and running it, and stays set *while* it runs — the compiler
+  unpins it, so the executing frame is otherwise the only reference to it.
+- `mark_roots()` now marks the closure of every live call frame. A closure
+  being executed is normally reachable anyway (a called function sits in the
+  caller's register, a named one is in `global_funcs_map`), but
+  `fh_call_vm_function()` puts its closure in the frame and nowhere else, so
+  a caller holding no other reference to it has the running function's own
+  constants collected under it.
+
+**Files Modified:** `src/compiler.c`, `src/program.c`, `src/program.h`,
+`src/gc.c`
+
+---
+
 ## All Features Completed! 🎉
 
 ---
@@ -334,6 +378,8 @@ Features 8-10 have their own suites:
 ./fh tests/test_stdlib_additions.fh
 ./fh tests/test_sort.fh
 ./fh tests/test_oop_proto.fh
+./fh tests/test_global_init.fh
+./fh tests/test_global_init_gc.fh
 ```
 
 Full test suite (all passing):

@@ -56,6 +56,11 @@ struct fh_program {
     map_t(struct fh_closure*) global_funcs_map;
     map_t(struct fh_value*) global_vars_map;  // GC roots (global variables)
 
+    /* The compiled `<globals>` function of a chunk that has been compiled but
+     * whose global initializers have not run yet. fh_compile_input() runs it
+     * and clears this; it is a GC root while it is set. */
+    struct fh_closure *globals_init;         // GC root
+
     map_void_t c_funcs_map;
 };
 

@@ -2960,99 +2960,95 @@ static const char *get_func_name(struct fh_compiler *c, struct fh_p_named_func *
     return name;
 }
 
-// Evaluate a constant expression at compile time
-// Returns 0 on success, -1 on failure (if expression is not a constant)
-static int eval_const_expr(struct fh_compiler *c, struct fh_p_expr *expr, struct fh_value *result) {
-    if (!expr) {
-        result->type = FH_VAL_NULL;
-        return 0;
+/* Compile the chunk's global initializers into one `<globals>` function.
+ *
+ * A global used to be limited to whatever a compile-time evaluator could
+ * fold, which ruled out the initializers people actually write: a closure,
+ * a call, a map holding functions, or anything mentioning another global.
+ * Now each initializer is ordinary compiled code -- `name = <expr>;` --
+ * gathered into a function that fh_compile_input() runs once the chunk is
+ * loaded, before anything else in it can be called.
+ *
+ * The names are already declared (as null) by the time this runs, so an
+ * initializer resolves them as globals, and every function in the chunk is
+ * already compiled, so an initializer may call one. Initializers run in
+ * declaration order, which is what makes `let b = a + 1;` after
+ * `let a = 1;` work and what leaves a forward reference reading null.
+ */
+static int compile_globals_init(struct fh_compiler *c, struct fh_func_def *func_def) {
+    const struct fh_p_global_var *first = c->ast->global_vars_vector->data[0];
+    const struct fh_src_loc func_loc = first->loc;
+
+    struct func_info *fi = new_func_info(c, func_loc, NULL);
+    if (!fi) {
+        fh_compiler_error(c, func_loc, "out of memory");
+        return -1;
     }
 
-    switch (expr->type) {
-        case EXPR_NULL:
-            result->type = FH_VAL_NULL;
-            return 0;
-        case EXPR_BOOL:
-            result->type = FH_VAL_BOOL;
-            result->data.b = expr->data.b;
-            return 0;
-        case EXPR_FLOAT:
-            result->type = FH_VAL_FLOAT;
-            result->data.num = expr->data.num;
-            return 0;
-        case EXPR_INTEGER:
-            result->type = FH_VAL_INTEGER;
-            result->data.i = expr->data.i;
-            return 0;
-        case EXPR_STRING: {
-            const char *str = fh_get_ast_string(c->ast, expr->data.str);
-            struct fh_string *str_obj = fh_make_string(c->prog, true, str);
-            if (!str_obj)
-                return -1;
-            result->type = FH_VAL_STRING;
-            result->data.obj = str_obj;
-            return 0;
+    for (int i = 0; i < c->ast->global_vars_vector->length; i++) {
+        const struct fh_p_global_var *gv = c->ast->global_vars_vector->data[i];
+        const struct fh_src_loc loc = gv->loc;
+
+        const char *name = fh_get_ast_symbol(c->ast, gv->name);
+        if (!name) {
+            fh_compiler_error(c, loc, "INTERNAL COMPILER ERROR: can't find global variable name");
+            goto err;
         }
-        case EXPR_ARRAY_LIT: {
-            struct fh_array *arr = fh_make_array(c->prog, true);
-            if (!arr)
-                return -1;
 
-            struct fh_p_expr *elem = expr->data.array_lit.elem_list;
-            while (elem) {
-                struct fh_value val;
-                if (eval_const_expr(c, elem, &val) < 0) {
-                    return fh_compiler_error(c, elem->loc, "array initializer must be constant expression");
-                }
-                struct fh_value *slot = fh_grow_array_object(c->prog, arr, 1);
-                if (!slot)
-                    return -1;
-                *slot = val;
-                elem = elem->next;
-            }
+        const int k = add_const_string_cstr(c, loc, name);
+        if (k < 0)
+            goto err;
 
-            result->type = FH_VAL_ARRAY;
-            result->data.obj = arr;
-            return 0;
-        }
-        case EXPR_MAP_LIT: {
-            struct fh_map *map = fh_make_map(c->prog, true);
-            if (!map)
-                return -1;
+        /* No initializer at all leaves the null the declaration pass set. */
+        if (!gv->init_val)
+            continue;
 
-            // Map literal elements are stored as alternating key-value pairs in a flat list
-            struct fh_p_expr *elem = expr->data.map_lit.elem_list;
-            while (elem) {
-                struct fh_p_expr *key_expr = elem;
-                elem = elem->next;
-                if (!elem) {
-                    return fh_compiler_error(c, key_expr->loc, "map initializer has key without value");
-                }
-                struct fh_p_expr *val_expr = elem;
-                elem = elem->next;
+        const int src_rk = compile_expr(c, gv->init_val);
+        if (src_rk < 0)
+            goto err;
 
-                struct fh_value key, val;
-                if (eval_const_expr(c, key_expr, &key) < 0) {
-                    return fh_compiler_error(c, key_expr->loc, "map key must be constant expression");
-                }
-                if (eval_const_expr(c, val_expr, &val) < 0) {
-                    return fh_compiler_error(c, val_expr->loc, "map value must be constant expression");
-                }
+        if (add_instr(c, loc, MAKE_INSTR_ABC(OPC_SETGLOBAL, 0, RK_FROM_CONST(k), src_rk)) < 0)
+            goto err;
 
-                struct fh_value map_val;
-                map_val.type = FH_VAL_MAP;
-                map_val.data.obj = map;
-                if (fh_add_map_entry(c->prog, &map_val, &key, &val) < 0)
-                    return -1;
-            }
-
-            result->type = FH_VAL_MAP;
-            result->data.obj = map;
-            return 0;
-        }
-        default:
-            return fh_compiler_error(c, expr->loc, "global variable initializer must be a constant expression");
+        free_tmp_regs(c, loc);
     }
+
+    if (add_instr(c, func_loc, MAKE_INSTR_AB(OPC_RET, 0, 0)) < 0)
+        goto err;
+
+    if (code_stack_shrink_to_fit(&fi->code) < 0
+        || value_stack_shrink_to_fit(&fi->consts) < 0
+        || fh_buf_shrink_to_fit(&fi->code_src_loc) < 0) {
+        fh_compiler_error(c, func_loc, "out of memory");
+        goto err;
+    }
+
+    func_def->n_regs = fi->num_regs;
+
+    peephole_optimize(&fi->code);
+
+    func_def->code_size = code_stack_size(&fi->code);
+    func_def->code = code_stack_data(&fi->code);
+    code_stack_init(&fi->code);
+
+    func_def->n_consts = value_stack_size(&fi->consts);
+    func_def->consts = value_stack_data(&fi->consts);
+    value_stack_init(&fi->consts);
+
+    func_def->n_upvals = upval_def_stack_size(&fi->upvals);
+    func_def->upvals = upval_def_stack_data(&fi->upvals);
+    upval_def_stack_init(&fi->upvals);
+
+    func_def->code_src_loc_size = fi->code_src_loc.size;
+    func_def->code_src_loc = fi->code_src_loc.p;
+    fh_init_buffer(&fi->code_src_loc);
+
+    pop_func_info(c);
+    return 0;
+
+err:
+    pop_func_info(c);
+    return -1;
 }
 
 int fh_compile(struct fh_compiler *c, struct fh_ast *ast) {
@@ -3061,7 +3057,9 @@ int fh_compile(struct fh_compiler *c, struct fh_ast *ast) {
 
     int pin_state = fh_get_pin_state(c->prog);
 
-    // Compile global variables first
+    /* Declare every global before anything is compiled, so that a function
+     * body and an initializer alike resolve the names as globals no matter
+     * what order they appear in. The values arrive later, from <globals>. */
     for (int i = 0; i < c->ast->global_vars_vector->length; i++) {
         struct fh_p_global_var *gv = c->ast->global_vars_vector->data[i];
 
@@ -3077,12 +3075,7 @@ int fh_compile(struct fh_compiler *c, struct fh_ast *ast) {
             goto err;
         }
 
-        // Evaluate initializer
-        struct fh_value init_val;
-        if (eval_const_expr(c, gv->init_val, &init_val) < 0)
-            goto err;
-
-        // Add to global variables
+        struct fh_value init_val = fh_new_null();
         if (fh_add_global_var(c->prog, name, &init_val) < 0) {
             fh_compiler_error(c, gv->loc, "out of memory");
             goto err;
@@ -3141,6 +3134,31 @@ int fh_compile(struct fh_compiler *c, struct fh_ast *ast) {
         }
         if (compile_named_func(c, f, closure->func_def) < 0)
             goto err;
+    }
+
+    /* Last, so an initializer may call any function in the chunk. */
+    if (c->ast->global_vars_vector->length > 0) {
+        const struct fh_p_global_var *first = c->ast->global_vars_vector->data[0];
+
+        struct fh_func_def *func_def = new_func_def(c, first->loc, "<globals>", 0);
+        if (!func_def) {
+            fh_compiler_error(c, first->loc, "out of memory");
+            goto err;
+        }
+
+        struct fh_closure *closure = fh_make_closure(c->prog, true, func_def);
+        if (!closure) {
+            fh_compiler_error(c, first->loc, "out of memory");
+            goto err;
+        }
+        closure->doc_string = NULL;
+
+        if (compile_globals_init(c, func_def) < 0)
+            goto err;
+
+        /* Handed to fh_compile_input(), which runs it and clears the slot.
+         * It is a GC root in the meantime -- nothing else refers to it. */
+        c->prog->globals_init = closure;
     }
 
     fh_restore_pin_state(c->prog, pin_state);

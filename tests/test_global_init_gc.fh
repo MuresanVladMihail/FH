@@ -1,0 +1,64 @@
+#-
+A collection *while the global initializers are running*.
+
+<globals> is an ordinary function while it runs, but nothing holds a
+reference to its closure except the frame it is executing in: the compiler
+unpins it before handing it over. An initializer that allocates enough to
+trigger a collection would otherwise have its own closure -- and the string
+constants its SETGLOBAL instructions read -- swept out from under it.
+
+The first initializer lowers the collection threshold so the ones after it
+collect repeatedly, mid-<globals>.
+-#
+
+let g_tuned  = tune();
+let g_one    = build(1);
+let g_two    = build(2);
+let g_three  = build(3);
+let g_four   = build(4);
+let g_five   = build(5);
+let g_six    = build(6);
+let g_seven  = build(7);
+let g_eight  = build(8);
+let g_closure_after = fn(x) { return x + 1; };
+let g_last   = "still here";
+
+fn tune() {
+    gc_frequency(1024);
+    return "tuned";
+}
+
+fn build(n) {
+    let a = [];
+    let i = 0;
+    while (i < 300) {
+        append(a, {"n": n, "s": "item-" + i});
+        i = i + 1;
+    }
+    return a;
+}
+
+fn main() {
+    gc_frequency(1000000);   # back to something sane for the rest of the run
+
+    assert(g_tuned == "tuned");
+    assert(g_last == "still here");
+
+    # every global set before, during and after the collections is intact
+    assert(len(g_one) == 300);
+    assert(len(g_eight) == 300);
+    assert(g_one[0].n == 1);
+    assert(g_eight[299].n == 8);
+    assert(g_eight[299].s == "item-299");
+    assert(g_five[150].s == "item-150");
+    assert(g_closure_after(41) == 42);
+
+    gc();
+    gc();
+
+    assert(g_last == "still here");
+    assert(g_three[299].s == "item-299");
+    assert(g_closure_after(1) == 2);
+
+    print("ok\n");
+}

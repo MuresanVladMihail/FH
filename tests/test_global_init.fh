@@ -1,0 +1,133 @@
+#-
+Global initializers are compiled code, not a constant-folding pass, so a
+global may now be anything an expression can produce -- and it may call the
+chunk's own functions.
+-#
+
+let G_NUMBER = 42;
+let G_STRING = "hello";
+let G_ARRAY  = [1, 2, 3];
+let G_MAP    = {"a": 1, "b": 2};
+let G_NULL   = null;
+let G_BOOL   = true;
+
+# things that were rejected before: a call, a closure, a map of closures,
+# arithmetic over another global, an expression over a literal
+let G_FROM_CALL   = make_config();
+let G_CLOSURE     = fn(x) { return x * 2; };
+let G_PROTO       = {"get": fn(self) { return self.n; },
+                     "bump": fn(self) { self.n = self.n + 1; return self; }};
+let G_DERIVED     = G_NUMBER * 2;
+let G_CONCAT      = G_STRING + " world";
+let G_NESTED      = [make_config(), {"inner": [1, [2, [3]]]}];
+let G_COMPUTED    = compute_sum(10);
+
+# order matters: this reads a global declared *below* it, so it sees null
+let g_forward     = g_declared_later;
+let g_declared_later = "set";
+
+# mutable (lowercase; ALL_CAPS is const by convention, enforced by the parser)
+let g_counter = 0;
+
+fn make_config() {
+    return {"debug": true, "retries": 3};
+}
+
+fn compute_sum(n) {
+    let total = 0;
+    let i = 1;
+    while (i <= n) { total = total + i; i = i + 1; }
+    return total;
+}
+
+fn test_plain_values() {
+    assert(G_NUMBER == 42);
+    assert(G_STRING == "hello");
+    assert(len(G_ARRAY) == 3 && G_ARRAY[2] == 3);
+    assert(G_MAP.a == 1 && G_MAP.b == 2);
+    assert(G_NULL == null);
+    assert(G_BOOL == true);
+}
+
+fn test_computed_values() {
+    # a call, even to a function declared further down the file: every
+    # function in the chunk is compiled before the initializers run
+    assert(G_FROM_CALL.debug == true);
+    assert(G_FROM_CALL.retries == 3);
+
+    assert(G_CLOSURE(21) == 42);
+    assert(type(G_CLOSURE) == "closure");
+
+    assert(G_DERIVED == 84);
+    assert(G_CONCAT == "hello world");
+    assert(G_COMPUTED == 55);
+
+    assert(G_NESTED[0].retries == 3);
+    assert(G_NESTED[1].inner[1][1][0] == 3);
+}
+
+fn test_map_of_closures() {
+    # the case that made this necessary: a prototype at file scope
+    let obj = setproto({"n": 5}, G_PROTO);
+    assert(obj:get() == 5);
+    assert(obj:bump():get() == 6);
+
+    # every instance shares the one prototype built at load time
+    let other = setproto({"n": 0}, G_PROTO);
+    assert(other.get == obj.get);
+}
+
+fn test_declaration_order() {
+    # initializers run top to bottom, so a forward reference reads the null
+    # the declaration pass left, not an error and not a later value
+    assert(g_forward == null);
+    assert(g_declared_later == "set");
+}
+
+fn test_still_writable() {
+    g_counter = g_counter + 1;
+    assert(g_counter == 1);
+    g_counter = 100;
+    assert(g_counter == 100);
+
+    # ALL_CAPS globals stay read-only -- the parser rejects assigning one,
+    # which is a compile error and so cannot be exercised from here.
+}
+
+fn test_survives_gc() {
+    #- <globals> is a real function while it runs, and the objects its
+       initializers built are reachable only through global_vars_map. Both
+       have to survive a collection. -#
+    gc();
+    gc();
+
+    assert(len(G_ARRAY) == 3);
+    assert(G_MAP.a == 1);
+    assert(G_FROM_CALL.retries == 3);
+    assert(G_CLOSURE(4) == 8);
+    assert(G_NESTED[1].inner[1][1][0] == 3);
+    assert(G_CONCAT == "hello world");
+
+    # allocate hard, then look again
+    let churn = [];
+    let i = 0;
+    while (i < 2000) {
+        append(churn, {"k": "v" + i});
+        i = i + 1;
+    }
+    gc();
+
+    assert(G_CONCAT == "hello world");
+    assert(G_FROM_CALL.debug == true);
+    assert(len(churn) == 2000);
+}
+
+fn main() {
+    test_plain_values();
+    test_computed_values();
+    test_map_of_closures();
+    test_declaration_order();
+    test_still_writable();
+    test_survives_gc();
+    print("ok\n");
+}
