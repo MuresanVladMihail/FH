@@ -89,6 +89,13 @@ Optional index: ?.[...]   (see 1.9)
 
 There is no ternary `?:` operator.
 
+`%` works on floats as well as integers. `int % int` stays an integer;
+anything with a float in it comes back as a float, computed with `fmod`. The
+sign follows the *dividend* on both paths (`-5 % 3 == -2`, `-5.5 % 3 ==
+-2.5`), which is C's rule, not Lua's floored one — FH keeps C's so that
+integer results never changed meaning. `math_fmod` remains available and now
+agrees with the operator.
+
 When one side of `+` is a string, the other is rendered into it: a number,
 a boolean (`"true"` / `"false"`) or `null` (`"null"`, the same word `print`
 and `json_stringify` use). Anything else — an array, a map, a closure — is
@@ -517,6 +524,9 @@ while (k != null) {
 | `string_trim(s)` | Returns `s` with leading/trailing whitespace removed. |
 | `string_format(fmt, ...)` | Like `printf` but returns a string instead of printing. Specifiers: `%d`/`%u`/`%x` (integer), `%f`/`%g` (float), `%s`/`%c` (string), `%%`. |
 | `string_join(sep, s1, s2, ...)` | Joins two or more strings with separator `sep` between them. |
+| `string_rep(s, n[, sep])` | Returns `s` repeated `n` times, with `sep` between copies (default none). `n <= 0` gives `""`. |
+| `string_starts_with(s, prefix)` | `true` if `s` begins with `prefix`. An empty prefix always matches. |
+| `string_ends_with(s, suffix)` | `true` if `s` ends with `suffix`. An empty suffix always matches. |
 
 ```
 string_split("a,b,c", ",");            # ["a", "b", "c"]
@@ -613,6 +623,8 @@ TAR archive I/O (also used for FH's own `.fhpack` package format):
 |---|---|
 | `os_time()` | Returns an opaque high-resolution timestamp object (`c_obj`), for use with `os_difftime`. |
 | `os_difftime(t0, t1)` | Returns the number of microseconds between two `os_time()` objects. |
+| `os_clock()` | CPU time used by the process, in seconds (a float), like Lua's `os.clock()`. Only differences between two readings mean anything. |
+| `os_monotonic()` | Seconds from a monotonic clock, as a float. The one to time a benchmark with: it never jumps when the wall clock is adjusted, and unlike `os_time()` it allocates nothing per reading. |
 | `os_localtime()` | Returns the current local time as a human-readable string (C's `asctime`). |
 | `os_command(cmd)` | Runs `cmd` through the system shell; returns `true` if it exited with status 0. |
 | `os_getenv(name)` | Returns the value of environment variable `name`, or `null` if unset. |

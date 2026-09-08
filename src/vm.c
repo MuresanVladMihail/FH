@@ -1473,18 +1473,37 @@ op_DIVF: {
 op_MOD: {
         struct fh_value *rb = LOAD_REG_OR_CONST(rb_i);
         struct fh_value *rc = LOAD_REG_OR_CONST(rc_i);
-        if (!fh_is_integer(rb) || !fh_is_integer(rc)) {
-            vm_error(vm, "'mod' expects integers");
+
+        if (fh_is_integer(rb) && fh_is_integer(rc)) {
+            int64_t rc_value = rc->data.i;
+            if (rc_value == 0) {
+                vm_error(vm, "division by zero");
+                goto user_err;
+            }
+
+            ra->type = FH_VAL_INTEGER;
+            ra->data.i = rb->data.i % rc_value;
+            DISPATCH();
+        }
+
+        /* At least one side is a float: fall back to fmod(), which truncates
+         * towards zero exactly like the integer '%' above. (Lua floors
+         * instead, so -5 % 3 is 1 there and -2 here -- matching Lua would
+         * have silently changed every existing integer result.) */
+        if (!fh_is_number(rb) || !fh_is_number(rc)) {
+            vm_error(vm, "'mod' expects numbers");
             goto user_err;
         }
-        int64_t rc_value = rc->data.i;
-        if (rc_value == 0) {
+
+        const double rb_d = fh_is_integer(rb) ? (double) rb->data.i : rb->data.num;
+        const double rc_d = fh_is_integer(rc) ? (double) rc->data.i : rc->data.num;
+        if (rc_d == 0.0) {
             vm_error(vm, "division by zero");
             goto user_err;
         }
 
-        ra->type = FH_VAL_INTEGER;
-        ra->data.i = rb->data.i % rc_value;
+        ra->type = FH_VAL_FLOAT;
+        ra->data.num = fmod(rb_d, rc_d);
         DISPATCH();
     }
 

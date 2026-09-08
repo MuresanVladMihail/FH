@@ -733,10 +733,14 @@ static int fn_math_random(struct fh_program *prog, struct fh_value *ret, struct 
     if (n_args > 2)
         return fh_set_error(prog, "math_random(): expected 0, 1 or 2 arguments");
 
-    /* math_random() -> float [0,1) */
+    /* math_random() -> float [0,1)
+     *
+     * Dividing by 2^32 (not UINT32_MAX) is what keeps 1.0 out of the range:
+     * with UINT32_MAX as the divisor, drawing UINT32_MAX returned exactly
+     * 1.0, and `math_random() * n` could then hand back n itself. */
     if (n_args == 0) {
         const uint32_t r = mt19937_next32(mt19937_generator);
-        *ret = fh_make_float((double) r / (double) UINT32_MAX);
+        *ret = fh_make_float((double) r / 4294967296.0);
         return 0;
     }
 
@@ -753,7 +757,7 @@ static int fn_math_random(struct fh_program *prog, struct fh_value *ret, struct 
             return fh_set_error(prog, "math_random(): argument must be > 0");
 
         const uint32_t r = rand_uniform((uint32_t) max);
-        *ret = fh_make_float((double) (r + 1));
+        *ret = fh_new_integer((int64_t) r + 1);
         return 0;
     }
 
@@ -775,7 +779,7 @@ static int fn_math_random(struct fh_program *prog, struct fh_value *ret, struct 
 
     const uint32_t r = rand_uniform(range);
 
-    *ret = fh_make_float((double) (min + r));
+    *ret = fh_new_integer((int64_t) min + (int64_t) r);
     return 0;
 }
 
@@ -784,6 +788,8 @@ static int fn_math_randomseed(struct fh_program *prog, struct fh_value *ret, str
 
     if (n_args == 0) {
         seed = (uint32_t) time(NULL);
+    } else if (n_args == 1 && fh_is_integer(&args[0])) {
+        seed = (uint32_t) fh_get_integer(&args[0]);
     } else if (n_args == 1 && fh_is_float(&args[0])) {
         seed = (uint32_t) fh_get_float(&args[0]);
     } else {
@@ -1619,6 +1625,98 @@ static int fn_string_reverse(struct fh_program *prog, struct fh_value *ret, stru
     return 0;
 }
 
+/* string_rep(s, n [, sep]) -- s repeated n times, with sep between copies.
+ * Modelled on Lua's string.rep; n <= 0 gives the empty string. */
+static int fn_string_rep(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    if (n_args < 2 || n_args > 3)
+        return fh_set_error(prog, "string_rep(): expected 2 or 3 arguments (string, count [, separator])");
+
+    if (!fh_is_string(&args[0]))
+        return fh_set_error(prog, "string_rep(): argument 1 must be a string, got %s",
+                            fh_type_to_str(prog, args[0].type));
+
+    int32_t count32;
+    if (fh_arg_int32(prog, &args[1], "string_rep()", 1, &count32) < 0)
+        return -1;
+
+    const char *sep = "";
+    if (n_args == 3) {
+        if (!fh_is_string(&args[2]))
+            return fh_set_error(prog, "string_rep(): argument 3 must be a string, got %s",
+                                fh_type_to_str(prog, args[2].type));
+        sep = GET_VAL_STRING_DATA(&args[2]);
+    }
+
+    if (count32 <= 0) {
+        *ret = fh_new_string(prog, "");
+        return 0;
+    }
+
+    const char *str = GET_VAL_STRING_DATA(&args[0]);
+    const size_t len = strlen(str);
+    const size_t sep_len = strlen(sep);
+    const size_t n = (size_t) count32;
+
+    /* n * (len + sep_len) can wrap on a 32-bit size_t long before malloc has
+     * a chance to fail, so check the multiplication itself. */
+    const size_t per_copy = len + sep_len;
+    if (per_copy != 0 && n > (SIZE_MAX - 1) / per_copy)
+        return fh_set_error(prog, "string_rep(): resulting string is too large");
+
+    const size_t total = n * len + (n - 1) * sep_len;
+    char *res = malloc(total + 1);
+    if (!res) return fh_set_error(prog, "string_rep(): out of memory");
+
+    char *w = res;
+    for (size_t i = 0; i < n; i++) {
+        if (i > 0 && sep_len) {
+            memcpy(w, sep, sep_len);
+            w += sep_len;
+        }
+        memcpy(w, str, len);
+        w += len;
+    }
+    *w = '\0';
+
+    *ret = fh_new_string(prog, res);
+    free(res);
+    return 0;
+}
+
+static int fn_string_starts_with(struct fh_program *prog, struct fh_value *ret,
+                                 struct fh_value *args, int n_args) {
+    if (check_n_args(prog, "string_starts_with()", 2, n_args))
+        return -1;
+
+    if (!fh_is_string(&args[0]) || !fh_is_string(&args[1]))
+        return fh_set_error(prog, "string_starts_with(): expected two strings");
+
+    const char *str = GET_VAL_STRING_DATA(&args[0]);
+    const char *prefix = GET_VAL_STRING_DATA(&args[1]);
+    const size_t prefix_len = strlen(prefix);
+
+    *ret = fh_new_bool(strlen(str) >= prefix_len && memcmp(str, prefix, prefix_len) == 0);
+    return 0;
+}
+
+static int fn_string_ends_with(struct fh_program *prog, struct fh_value *ret,
+                               struct fh_value *args, int n_args) {
+    if (check_n_args(prog, "string_ends_with()", 2, n_args))
+        return -1;
+
+    if (!fh_is_string(&args[0]) || !fh_is_string(&args[1]))
+        return fh_set_error(prog, "string_ends_with(): expected two strings");
+
+    const char *str = GET_VAL_STRING_DATA(&args[0]);
+    const char *suffix = GET_VAL_STRING_DATA(&args[1]);
+    const size_t str_len = strlen(str);
+    const size_t suffix_len = strlen(suffix);
+
+    *ret = fh_new_bool(str_len >= suffix_len &&
+                       memcmp(str + str_len - suffix_len, suffix, suffix_len) == 0);
+    return 0;
+}
+
 static char *substr(char const *input, size_t start, size_t len) {
     char *ret = malloc(len + 1);
     if (!ret) return NULL;
@@ -2095,6 +2193,54 @@ static int fn_os_difftime(struct fh_program *prog, struct fh_value *ret, struct 
     const struct timeval *final = (struct timeval *) fh_get_c_obj_value(&args[1]);
     *ret = fh_new_integer(timedifference_usec(*start, *final));
     return 0;
+}
+
+/* os_clock() -- CPU time used by the process, in seconds, like Lua's
+ * os.clock(). Only differences between two readings are meaningful. */
+static int fn_os_clock(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    UNUSED(args);
+    FH_REQUIRE_EXACT_ARGS(prog, "os_clock()", 0, n_args);
+
+    const clock_t c = clock();
+    if (c == (clock_t) -1)
+        return fh_set_error(prog, "os_clock(): CPU time is not available on this platform");
+
+    *ret = fh_make_float((double) c / (double) CLOCKS_PER_SEC);
+    return 0;
+}
+
+/* os_monotonic() -- seconds from a monotonic clock, as a float.
+ *
+ * This is the one to time a benchmark with: unlike os_time() it never jumps
+ * when the wall clock is adjusted, it has nanosecond resolution where the
+ * platform offers it, and it needs no c_obj allocation per reading. */
+static int fn_os_monotonic(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    UNUSED(args);
+    FH_REQUIRE_EXACT_ARGS(prog, "os_monotonic()", 0, n_args);
+
+#if defined(FH_OS_WINDOWS)
+    LARGE_INTEGER freq, counter;
+    if (QueryPerformanceFrequency(&freq) && QueryPerformanceCounter(&counter) && freq.QuadPart != 0) {
+        *ret = fh_make_float((double) counter.QuadPart / (double) freq.QuadPart);
+        return 0;
+    }
+#elif defined(CLOCK_MONOTONIC)
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+        *ret = fh_make_float((double) ts.tv_sec + (double) ts.tv_nsec / 1e9);
+        return 0;
+    }
+#endif
+
+    /* No monotonic source: fall back to the wall clock rather than failing,
+     * so a benchmark script still runs (it is just adjustment-sensitive). */
+    {
+        struct timeval tv;
+        if (gettimeofday(&tv, NULL) != 0)
+            return fh_set_error(prog, "os_monotonic(): no clock available on this platform");
+        *ret = fh_make_float((double) tv.tv_sec + (double) tv.tv_usec / 1e6);
+        return 0;
+    }
 }
 
 static int fn_os_localtime(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
@@ -2908,8 +3054,13 @@ const struct fh_named_c_func fh_std_c_funcs[] = {
     DEF_FN(string_trim),
     DEF_FN(string_format),
     DEF_FN(string_join),
+    DEF_FN(string_rep),
+    DEF_FN(string_starts_with),
+    DEF_FN(string_ends_with),
 
     DEF_FN(os_time),
+    DEF_FN(os_clock),
+    DEF_FN(os_monotonic),
     DEF_FN(os_difftime),
     DEF_FN(os_localtime),
     DEF_FN(os_command),

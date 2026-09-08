@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 #include "compiler.h"
 #include "stack.h"
@@ -1105,6 +1106,10 @@ static int try_fold_const_bin_op(struct fh_compiler *c, struct fh_src_loc loc,
                 if (right_val == 0.0) return -1;
                 result = left_val / right_val;
                 break;
+            case '%':
+                if (right_val == 0.0) return -1;
+                result = fmod(left_val, right_val);
+                break;
             case AST_OP_LT: result = (left_val < right_val); break;
             case AST_OP_GT: result = (left_val > right_val); break;
             case AST_OP_LE: result = (left_val <= right_val); break;
@@ -1235,12 +1240,15 @@ static int compile_bin_op_to_reg(struct fh_compiler *c, struct fh_src_loc loc, s
             break;
 
         case '%':
-            // MOD is int-only in your VM
-            if (require_int_operands_if_known(c, loc, "mod", hl, hr) < 0)
-                return -1;
-
+            /* int % int stays integer; anything with a known float in it
+             * comes back as a float (the VM falls back to fmod). */
             opc = OPC_MOD;
-            set_reg_hint(fi, dest_reg, H_INT);
+            if (hl == H_INT && hr == H_INT)
+                set_reg_hint(fi, dest_reg, H_INT);
+            else if (hl == H_FLOAT || hr == H_FLOAT)
+                set_reg_hint(fi, dest_reg, H_FLOAT);
+            else
+                set_reg_hint(fi, dest_reg, H_UNKNOWN);
             break;
 
         case '|':
