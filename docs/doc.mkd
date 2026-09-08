@@ -85,9 +85,17 @@ Increment:    ++x  x++  --x  x--   (prefix and postfix)
 Assignment:   =
 String concat: +          (e.g. "a" + "b" == "ab")
 Optional index: ?.[...]   (see 1.9)
+Method call:  obj:name(...)          (see 1.12)
 ```
 
 There is no ternary `?:` operator.
+
+`%` works on floats as well as integers. `int % int` stays an integer;
+anything with a float in it comes back as a float, computed with `fmod`. The
+sign follows the *dividend* on both paths (`-5 % 3 == -2`, `-5.5 % 3 ==
+-2.5`), which is C's rule, not Lua's floored one — FH keeps C's so that
+integer results never changed meaning. `math_fmod` remains available and now
+agrees with the operator.
 
 When one side of `+` is a string, the other is rendered into it: a number,
 a boolean (`"true"` / `"false"`) or `null` (`"null"`, the same word `print`
@@ -367,6 +375,69 @@ g.excited = true;
 print(g.hello());     # Hello, world!
 ```
 
+#### Prototypes, for when there are many instances
+
+The closure-per-method pattern above pays for itself in privacy and bound
+methods, but it allocates one closure **per method per instance**: fifty
+enemies with five methods each is 250 closures, all identical. When the
+instance count matters more than privacy, put the methods on a shared map
+once and give each instance that map as its **prototype**:
+
+```
+fn CounterProto() {
+    return {
+        "inc": fn(self, by) { self.n = self.n + by; return self; },
+        "get": fn(self) { return self.n; }
+    };
+}
+
+let proto = CounterProto();                  # built once
+
+let c = setproto({"n": 0}, proto);           # cheap: one map per instance
+c:inc(5);
+c:inc(3);
+print(c:get());                              # 8
+```
+
+A key the object does not have is looked up in its prototype, then in that
+prototype's prototype, and so on. This is the job Lua gives `__index`,
+without the metatable around it.
+
+| Function | Description |
+|---|---|
+| `setproto(map, proto)` | Makes `proto` (a map, or `null` to clear) the prototype of `map`, and returns `map`. Refuses to create a cycle. |
+| `getproto(map)` | The map's prototype, or `null`. |
+
+The prototype is a slot on the map, **not an entry in it**. So it never
+shows up in `next_key()` iteration, `len()`, `contains_key()` or
+`json_stringify()` — serializing an object does not drag its class along.
+`contains_key()` stays raw for the same reason; use `obj.key != null` if you
+want the chain consulted.
+
+Writes always land on the object itself. `c.n = 1` never reaches through to
+the prototype, so instances cannot corrupt each other by assignment.
+
+**`object:method(args)`** fetches `object.method` and calls it with `object`
+in front of the given arguments — Lua's colon call. Two details are worth
+knowing:
+
+- The object expression is evaluated **exactly once**, so
+  `make_enemy():spawn()` constructs one enemy, not two. That is why it is
+  real syntax rather than sugar for `obj.method(obj, ...)`.
+- The receiver arrives as an ordinary first parameter, which you name
+  yourself. `self` is a convention here, not a keyword:
+  `fn(self, by) { ... }`.
+
+`:` is only for calling. Use `.` to read a field — `obj:field` without an
+argument list is a syntax error rather than something that silently means
+something else.
+
+The two styles compose: a prototype method is a plain function on a map, so
+an object built by the closure constructor can still be handed a prototype
+for the methods it does not need to close over. Choose by what you are
+optimizing: the closure pattern for real privacy and bound methods, the
+prototype for instance count.
+
 #### One object per file
 
 For anything longer than a page, give each concern its own file, with one
@@ -483,8 +554,31 @@ len("hello");        # 5
 | `delete(container, key_or_index)` | Removes an entry from an array (by index) or map (by key) and returns the removed value. |
 | `reset(container)` | Empties an array or map in place (keeps the underlying allocation, avoiding a realloc on reuse). |
 | `reserve(container, capacity)` | Pre-allocates capacity in an array or map and returns it. |
+| `sort(array[, comparator])` | Sorts `array` **in place** and returns it. Without a comparator, numbers sort numerically and strings by `strcmp`; mixing kinds is an error. With one, `comparator(a, b)` is asked whether `a` comes before `b` (Lua's `table.sort` convention). The sort is **stable**, so equal elements keep their original order. |
+| `setproto(map, proto)` | Gives `map` a prototype consulted for keys it does not have, and returns `map`. Pass `null` to clear it. See 1.12. |
+| `getproto(map)` | The map's prototype, or `null`. |
 | `docstring(fn)` | Returns the docstring of a closure (`fn f() : "doc" {}`), or `""` if it has none. Only works on closures. |
 | `getversion()` | Returns the FH version string (e.g. `"1.0.rc6"`). |
+
+**Sorting.** `sort` is the only built-in that calls back into your script, so
+it is worth knowing what it guarantees:
+
+```
+sort(scores);                                   # ascending, in place
+sort(names);                                    # strings, by strcmp
+sort(people, fn(a, b) { return a.age < b.age; });   # by a field
+sort(scores, fn(a, b) { return a > b; });       # descending
+```
+
+- It sorts **in place** and returns the same array, so `let top = sort(xs)[0];`
+  works and `xs` is sorted afterwards too.
+- It is **stable**: sorting by one field and then another gives the ordering
+  you would expect.
+- The comparator answers "does `a` come before `b`?" — the same convention as
+  Lua's `table.sort`. It must not resize the array; if it does, the sort stops
+  with an error rather than shuffling indices that no longer mean anything.
+- An error raised inside the comparator propagates out of `sort` and is
+  catchable with `pcall`.
 | `error(x)` | Aborts the script with `x` as the message. A string is used as-is; any other value is rendered into one. |
 | `pcall(f[, args...])` | Calls `f` with `args`, catching an error instead of aborting. Returns a map: `{ok: true, value: ...}` or `{ok: false, error: "...", file, line, col, traceback}`. See 1.10. |
 | `assert(cond[, msg])` | Raises an error if `cond` is falsy; `msg` is included in the error if given. |
@@ -517,6 +611,9 @@ while (k != null) {
 | `string_trim(s)` | Returns `s` with leading/trailing whitespace removed. |
 | `string_format(fmt, ...)` | Like `printf` but returns a string instead of printing. Specifiers: `%d`/`%u`/`%x` (integer), `%f`/`%g` (float), `%s`/`%c` (string), `%%`. |
 | `string_join(sep, s1, s2, ...)` | Joins two or more strings with separator `sep` between them. |
+| `string_rep(s, n[, sep])` | Returns `s` repeated `n` times, with `sep` between copies (default none). `n <= 0` gives `""`. |
+| `string_starts_with(s, prefix)` | `true` if `s` begins with `prefix`. An empty prefix always matches. |
+| `string_ends_with(s, suffix)` | `true` if `s` ends with `suffix`. An empty suffix always matches. |
 
 ```
 string_split("a,b,c", ",");            # ["a", "b", "c"]
@@ -613,6 +710,8 @@ TAR archive I/O (also used for FH's own `.fhpack` package format):
 |---|---|
 | `os_time()` | Returns an opaque high-resolution timestamp object (`c_obj`), for use with `os_difftime`. |
 | `os_difftime(t0, t1)` | Returns the number of microseconds between two `os_time()` objects. |
+| `os_clock()` | CPU time used by the process, in seconds (a float), like Lua's `os.clock()`. Only differences between two readings mean anything. |
+| `os_monotonic()` | Seconds from a monotonic clock, as a float. The one to time a benchmark with: it never jumps when the wall clock is adjusted, and unlike `os_time()` it allocates nothing per reading. |
 | `os_localtime()` | Returns the current local time as a human-readable string (C's `asctime`). |
 | `os_command(cmd)` | Runs `cmd` through the system shell; returns `true` if it exited with status 0. |
 | `os_getenv(name)` | Returns the value of environment variable `name`, or `null` if unset. |

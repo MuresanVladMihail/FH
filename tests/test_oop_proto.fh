@@ -1,0 +1,221 @@
+#-
+Prototypes (setproto/getproto) and the obj:method() call syntax.
+
+The pattern this replaces: tests/oop.fh builds each instance out of one
+closure per method, so ten objects with five methods allocate fifty
+closures. With a prototype, the methods are allocated once and shared.
+-#
+
+fn new_counter_proto() {
+    return {
+        "inc":   fn(self, by) { self.n = self.n + by; return self; },
+        "get":   fn(self) { return self.n; },
+        "label": fn(self, prefix) { return prefix + ":" + self.n; }
+    };
+}
+
+fn test_lookup_through_proto() {
+    let Animal = {"kind": "animal", "legs": 4};
+
+    let dog = setproto({"name": "rex"}, Animal);
+    assert(dog.name == "rex");     # own key
+    assert(dog.kind == "animal");  # from the prototype
+    assert(dog.legs == 4);
+    assert(dog.missing == null);   # a miss is still null, not an error
+
+    # an own key shadows the prototype
+    let cat = setproto({"kind": "cat"}, Animal);
+    assert(cat.kind == "cat");
+    assert(cat.legs == 4);
+
+    # index syntax follows the chain too, not just dot syntax
+    assert(dog["kind"] == "animal");
+
+    # writes always land on the object itself, never on the prototype
+    dog.legs = 3;
+    assert(dog.legs == 3);
+    assert(Animal.legs == 4);
+    assert(cat.legs == 4);
+
+    # chains
+    let Puppy = setproto({"kind": "puppy"}, Animal);
+    let rex = setproto({}, Puppy);
+    assert(rex.kind == "puppy");
+    assert(rex.legs == 4);
+
+    # getproto, and clearing a prototype
+    assert(getproto(dog) == Animal);
+    assert(getproto(Animal) == null);
+    setproto(dog, null);
+    assert(dog.kind == null);
+    assert(getproto(dog) == null);
+
+    # setproto returns the object, so it composes into an expression
+    let z = setproto({"a": 1}, Animal).kind;
+    assert(z == "animal");
+}
+
+fn test_proto_is_not_a_key() {
+    #- The prototype lives in a slot on the map, not under a reserved key,
+       so it stays out of iteration and out of serialization. -#
+    let Base = {"shared": 1};
+    let obj = setproto({"own": 2}, Base);
+
+    let seen = "";
+    let k = next_key(obj, null);
+    while (k != null) {
+        seen = seen + k + ",";
+        k = next_key(obj, k);
+    }
+    assert(seen == "own,");
+
+    assert(len(obj) == 1);
+    assert(contains_key(obj, "own") == true);
+    assert(contains_key(obj, "shared") == false);   # raw, does not follow the chain
+
+    let json = json_stringify(obj);
+    assert(string_find(json, "own") >= 0);
+    assert(string_find(json, "shared") == -1);
+}
+
+fn test_method_calls() {
+    let proto = new_counter_proto();
+    let c = setproto({"n": 0}, proto);
+
+    c:inc(5);
+    c:inc(3);
+    assert(c:get() == 8);
+    assert(c.n == 8);
+    assert(c:label("count") == "count:8");
+
+    # inc returns self, so calls chain
+    assert(c:inc(1):inc(1):get() == 10);
+
+    # a method on a plain map, no prototype involved
+    let obj = {"v": 7, "twice": fn(self) { return self.v * 2; }};
+    assert(obj:twice() == 14);
+
+    # zero-argument and multi-argument methods
+    let m = {
+        "none": fn(self) { return "none"; },
+        "three": fn(self, a, b, c) { return a + b + c; }
+    };
+    assert(m:none() == "none");
+    assert(m:three(1, 2, 3) == 6);
+
+    # a method call nested in an argument, and in an expression
+    assert(c:label(m:none()) == "none:10");
+    assert(c:get() + obj:twice() == 24);
+
+    # methods reached through an array element and a nested field
+    let holder = {"inner": setproto({"n": 4}, proto)};
+    assert(holder.inner:get() == 4);
+    let arr = [setproto({"n": 1}, proto), setproto({"n": 2}, proto)];
+    assert(arr[1]:get() == 2);
+}
+
+fn test_object_evaluated_once() {
+    #- The reason obj:method() is a node of its own rather than sugar for
+       obj.method(obj, ...): the object expression must run exactly once. -#
+    let proto = new_counter_proto();
+    let calls = 0;
+    let make = fn() {
+        calls = calls + 1;
+        return setproto({"n": 10}, proto);
+    };
+
+    assert(make():get() == 10);
+    assert(calls == 1);
+
+    make():inc(1);
+    assert(calls == 2);
+}
+
+fn test_shared_methods() {
+    # many instances, one copy of the methods
+    let proto = new_counter_proto();
+    let objs = [];
+    let i = 0;
+    while (i < 50) {
+        append(objs, setproto({"n": i}, proto));
+        i = i + 1;
+    }
+
+    i = 0;
+    let total = 0;
+    while (i < 50) {
+        total = total + objs[i]:inc(1):get();
+        i = i + 1;
+    }
+    assert(total == 1225 + 50);   # sum(0..49) + one increment each
+
+    # every instance sees the same method object
+    assert(objs[0].get == objs[49].get);
+    assert(objs[0].get == proto.get);
+}
+
+fn test_gc_keeps_prototypes_alive() {
+    #- A prototype referenced only by the objects that use it must survive
+       collection: the slot is a GC root through the map. -#
+    let objs = [];
+    let i = 0;
+    while (i < 20) {
+        let proto = {"tag": "p" + i, "who": fn(self) { return self.tag; }};
+        append(objs, setproto({"id": i}, proto));
+        i = i + 1;
+    }
+
+    gc();
+    gc();
+
+    i = 0;
+    while (i < 20) {
+        assert(objs[i]:who() == "p" + i);
+        assert(objs[i].id == i);
+        i = i + 1;
+    }
+}
+
+fn test_errors() {
+    let Base = {"a": 1};
+
+    # setproto/getproto argument checking
+    assert(pcall(setproto, 5, Base).ok == false);
+    assert(pcall(setproto, {}, 5).ok == false);
+    assert(pcall(getproto, 5).ok == false);
+    assert(pcall(setproto, {}).ok == false);
+
+    # a cycle is refused when it is made, not walked into later
+    let a = {};
+    let b = setproto({}, a);
+    let cyc = pcall(setproto, a, b);
+    assert(cyc.ok == false);
+    assert(string_find(cyc.error, "cycle") >= 0);
+
+    # a one-map self-cycle too
+    let self_cyc = pcall(fn() { let m = {}; return setproto(m, m); });
+    assert(self_cyc.ok == false);
+
+    # calling a method nothing in the chain has
+    let obj = setproto({}, Base);
+    let missing = pcall(fn() { return obj:nope(); });
+    assert(missing.ok == false);
+
+    # calling a field that exists but is not a function
+    let not_fn = pcall(fn() { return obj:a(); });
+    assert(not_fn.ok == false);
+
+    # the interpreter is fine afterwards
+    assert(obj.a == 1);
+}
+
+fn main() {
+    test_lookup_through_proto();
+    test_proto_is_not_a_key();
+    test_method_calls();
+    test_object_evaluated_once();
+    test_shared_methods();
+    test_gc_keeps_prototypes_alive();
+    test_errors();
+    print("ok\n");
+}

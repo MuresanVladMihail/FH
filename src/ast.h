@@ -123,6 +123,7 @@ enum fh_expr_type {
     EXPR_POST_INC,
     EXPR_POST_DEC,
     EXPR_OPTIONAL_INDEX,  // Optional chaining: container?.[index]
+    EXPR_METHOD_CALL,     // Method call: object:name(args)
 };
 
 struct fh_p_expr_bin_op {
@@ -138,6 +139,16 @@ struct fh_p_expr_un_op {
 
 struct fh_p_expr_func_call {
     struct fh_p_expr *func;
+    struct fh_p_expr *arg_list;
+};
+
+/* object:method(args) -- the object is evaluated once and then serves twice:
+ * the method is fetched from it, and it is passed to that method as the
+ * first argument. Desugaring to a plain call would evaluate it twice, which
+ * is wrong the moment the object expression has a side effect. */
+struct fh_p_expr_method_call {
+    struct fh_p_expr *object;
+    struct fh_p_expr *method;   /* an EXPR_STRING node holding the name */
     struct fh_p_expr *arg_list;
 };
 
@@ -182,6 +193,7 @@ struct fh_p_expr {
         struct fh_p_expr_un_op un_op;
         struct fh_p_expr_func func;
         struct fh_p_expr_func_call func_call;
+        struct fh_p_expr_method_call method_call;
         struct fh_p_expr_index index;
         struct fh_p_expr_array_lit array_lit;
         struct fh_p_expr_map_lit map_lit;

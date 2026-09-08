@@ -17,6 +17,7 @@ static bool expr_needs_paren(struct fh_p_expr *expr) {
         case EXPR_INTEGER:
         case EXPR_STRING:
         case EXPR_FUNC_CALL:
+        case EXPR_METHOD_CALL:
             return false;
 
         default:
@@ -124,6 +125,21 @@ static void dump_expr(struct fh_ast *ast, int indent, struct fh_p_expr *expr) {
             if (expr_needs_paren(expr->data.func_call.func)) printf(")");
             printf("(");
             for (struct fh_p_expr *e = expr->data.func_call.arg_list; e != NULL; e = e->next) {
+                dump_expr(ast, indent, e);
+                if (e->next)
+                    printf(", ");
+            }
+            printf(")");
+            return;
+
+        case EXPR_METHOD_CALL:
+            if (expr_needs_paren(expr->data.method_call.object)) printf("(");
+            dump_expr(ast, indent, expr->data.method_call.object);
+            if (expr_needs_paren(expr->data.method_call.object)) printf(")");
+            printf(":");
+            dump_expr(ast, indent, expr->data.method_call.method);
+            printf("(");
+            for (struct fh_p_expr *e = expr->data.method_call.arg_list; e != NULL; e = e->next) {
                 dump_expr(ast, indent, e);
                 if (e->next)
                     printf(", ");

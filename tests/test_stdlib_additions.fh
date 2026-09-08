@@ -1,0 +1,137 @@
+#-
+Papercuts closed in one go: '%' on floats, math_random()'s Lua-shaped
+return types, the three missing string helpers, and a clock you can time a
+benchmark with.
+-#
+
+fn test_float_modulo() {
+    # folded at compile time (both operands literal)
+    assert(5.5 % 2 == 1.5);
+    assert(7 % 3 == 1);
+
+    # evaluated by the VM
+    let a = 5.5;
+    let b = 2;
+    assert(a % b == 1.5);
+
+    let c = 10;
+    let d = 4.0;
+    assert(c % d == 2.0);
+
+    # int % int is still an integer, and still truncates towards zero the way
+    # C does -- FH deliberately does not use Lua's floored modulo here
+    assert(type(c % 3) == "integer");
+    assert(-5 % 3 == -2);
+    assert(-5.5 % 3 == -2.5);
+
+    # float results are floats
+    assert(type(a % b) == "number");
+
+    # zero divisor and non-numbers are still errors, on both paths
+    let z = pcall(fn() { let n = 0; return 5 % n; });
+    assert(z.ok == false);
+
+    let zf = pcall(fn() { let n = 0.0; return 5.5 % n; });
+    assert(zf.ok == false);
+
+    let bad = pcall(fn() { return 5 % "x"; });
+    assert(bad.ok == false);
+}
+
+fn test_random() {
+    math_randomseed(1234);
+
+    # math_random() -> float in [0, 1)
+    let f = math_random();
+    assert(type(f) == "number");
+    assert(f >= 0.0);
+    assert(f < 1.0);
+
+    # math_random(n) -> integer in [1, n], like Lua
+    let one = math_random(1);
+    assert(type(one) == "integer");
+    assert(one == 1);
+
+    # math_random(m, n) -> integer in [m, n]
+    let i = 0;
+    while (i < 200) {
+        let r = math_random(3, 7);
+        assert(type(r) == "integer");
+        assert(r >= 3);
+        assert(r <= 7);
+        i = i + 1;
+    }
+
+    # the point of returning an integer: it can index an array
+    let arr = ["a", "b", "c"];
+    let picked = arr[math_random(1, 3) - 1];
+    assert(picked == "a" || picked == "b" || picked == "c");
+
+    # seeding is reproducible, and takes an integer seed
+    math_randomseed(99);
+    let first = math_random(1, 1000000);
+    math_randomseed(99);
+    assert(math_random(1, 1000000) == first);
+}
+
+fn test_string_helpers() {
+    assert(string_rep("ab", 3) == "ababab");
+    assert(string_rep("x", 3, "-") == "x-x-x");
+    assert(string_rep("x", 1, "-") == "x");
+    assert(string_rep("x", 0) == "");
+    assert(string_rep("x", -2) == "");
+    assert(string_rep("", 5) == "");
+    assert(string_rep("", 3, ",") == ",,");
+
+    assert(string_starts_with("hello world", "hello") == true);
+    assert(string_starts_with("hello", "hello") == true);
+    assert(string_starts_with("hello", "") == true);
+    assert(string_starts_with("hello", "hello world") == false);
+    assert(string_starts_with("hello", "world") == false);
+
+    assert(string_ends_with("hello world", "world") == true);
+    assert(string_ends_with("world", "world") == true);
+    assert(string_ends_with("hello", "") == true);
+    assert(string_ends_with("hi", "ohi") == false);
+    assert(string_ends_with("hello", "hell") == false);
+
+    # the source string is never modified in place
+    let s = "abc";
+    let r = string_rep(s, 2);
+    assert(s == "abc");
+    assert(r == "abcabc");
+
+    # wrong types are errors, not silent nonsense
+    assert(pcall(string_rep, 5, 2).ok == false);
+    assert(pcall(string_starts_with, "a", 1).ok == false);
+    assert(pcall(string_ends_with, 1, "a").ok == false);
+}
+
+fn test_clocks() {
+    let cpu = os_clock();
+    assert(type(cpu) == "number");
+    assert(cpu >= 0.0);
+
+    let t0 = os_monotonic();
+    assert(type(t0) == "number");
+
+    let i = 0;
+    let sink = 0;
+    while (i < 200000) {
+        sink = sink + i;
+        i = i + 1;
+    }
+
+    let t1 = os_monotonic();
+    assert(t1 >= t0);                 # monotonic: never goes backwards
+    assert(os_clock() >= cpu);
+    assert(sink > 0);
+}
+
+fn main() {
+    test_float_modulo();
+    test_random();
+    test_string_helpers();
+    test_clocks();
+    print("ok\n");
+}

@@ -1,6 +1,6 @@
 # New Features Implementation Summary
 
-## ✅ Completed Features (7/7)
+## ✅ Completed Features (10/10)
 
 ### 1. String Interpolation
 
@@ -219,6 +219,103 @@ a complaint about the argument's type.
 
 ---
 
+### 8. Four stdlib papercuts closed
+
+- **`%` works on floats.** `5.5 % 2` is `1.5`. `int % int` stays an integer;
+  anything with a float in it comes back as a float, via `fmod`. The sign
+  follows the dividend on both paths (`-5 % 3 == -2`), which is C's rule and
+  not Lua's floored one — adopting Lua's would have silently changed every
+  existing integer result.
+- **`math_random` returns what the manual already said it did.**
+  `math_random(n)` and `math_random(m, n)` returned floats, so the obvious
+  use — `arr[math_random(1, len(arr))]` — failed with "non-integer index".
+  They return integers now. `math_random()` divided by `UINT32_MAX`, so a
+  maximal draw returned exactly `1.0` inside a range documented as `[0, 1)`.
+  `math_randomseed()` accepts an integer seed.
+- **`string_rep(s, n[, sep])`, `string_starts_with()`, `string_ends_with()`.**
+- **`os_clock()`** (CPU seconds, like Lua's) and **`os_monotonic()`** (a
+  high-resolution clock that does not jump when the wall clock is adjusted
+  and allocates nothing per reading, unlike `os_time()`, which returns a
+  GC-managed `c_obj` per call).
+
+**Files Modified:** `src/vm.c`, `src/compiler.c`, `src/c_funcs.c`
+
+---
+
+### 9. `sort()` — the gap you noticed the first time you needed it
+
+```fh
+sort(scores);                                        # ascending, in place
+sort(names);                                         # strings, by strcmp
+sort(people, fn(a, b) { return a.age < b.age; });    # by a field
+sort(scores, fn(a, b) { return a > b; });            # descending
+```
+
+It sorts **in place** and returns the same array. It is **stable**, so
+sorting by one field then another does what you expect. The comparator is
+asked "does `a` come before `b`?" — Lua's `table.sort` convention. Without
+one, numbers sort numerically and strings by `strcmp`, which also gives
+scripts an ordering on strings for the first time, since the VM's `<` only
+accepts numbers.
+
+Two implementation notes, since it is the only builtin that calls back into
+script:
+
+- It sorts a permutation of **indices**, not the values. The values never
+  leave `arr->items`, which the collector reaches through the caller's
+  register — a merge sort moving `fh_value`s through a malloc'd buffer would
+  hold the only reference to them somewhere `mark_roots()` does not walk, and
+  a comparator that allocates would collect them.
+- Bottom-up merge sort rather than heapsort: stable, about half the
+  comparisons, and it cannot run off either end when handed an inconsistent
+  comparator. A comparator that resizes the array aborts the sort; an error
+  inside one propagates out and is catchable with `pcall`.
+
+**Implementation:** `fn_sort` in `src/c_funcs.c`.
+
+---
+
+### 10. Prototypes and `obj:method()`
+
+The closure-per-method object pattern allocates one closure **per method per
+instance**. Fifty enemies with five methods each is 250 closures, all
+identical. Prototypes share one copy:
+
+```fh
+let proto = {
+    "inc": fn(self, by) { self.n = self.n + by; return self; },
+    "get": fn(self) { return self.n; }
+};
+
+let c = setproto({"n": 0}, proto);
+c:inc(5);
+print(c:get());       # 5
+```
+
+A key the object does not have is looked up in its prototype, then in that
+prototype's prototype — the job Lua gives `__index`, without the metatable
+around it. Measured on 50,000 objects with five methods: **2.2× less memory**
+(43.8 MB → 20.3 MB), 2.5× faster to construct, and 5.3× faster method calls.
+
+- `setproto(map, proto)` / `getproto(map)`. A cycle is refused when it is
+  made, not walked into later.
+- The prototype is a **slot on the map, not an entry in it**, so it stays out
+  of `next_key()`, `len()`, `contains_key()` and `json_stringify()` — an
+  object does not serialize its class.
+- Writes always land on the object itself, so instances cannot corrupt each
+  other by assignment.
+- `object:method(args)` fetches `object.method` and calls it with `object` in
+  front of the arguments. The object expression is evaluated **exactly
+  once**, which is why it is real syntax rather than sugar for
+  `obj.method(obj, ...)`. The receiver is an ordinary first parameter you
+  name yourself; `self` is a convention, not a keyword.
+
+**Files Modified:** `src/value.h`, `src/value.c`, `src/gc.c`, `src/vm.c`,
+`src/c_funcs.c`, `src/ast.h`, `src/ast.c`, `src/parser.c`, `src/compiler.c`,
+`src/dump_ast.c`
+
+---
+
 ## All Features Completed! 🎉
 
 ---
@@ -229,6 +326,14 @@ All features are tested in `tests/test_new_features.fh`:
 
 ```bash
 ./fh tests/test_new_features.fh
+```
+
+Features 8-10 have their own suites:
+
+```bash
+./fh tests/test_stdlib_additions.fh
+./fh tests/test_sort.fh
+./fh tests/test_oop_proto.fh
 ```
 
 Full test suite (all passing):

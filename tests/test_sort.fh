@@ -1,0 +1,193 @@
+#-
+sort(array [, comparator]) -- in place, stable, and safe to hand a
+comparator that allocates or misbehaves.
+-#
+
+fn is_ascending(a) {
+    let i = 1;
+    while (i < len(a)) {
+        if (a[i - 1] > a[i]) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn test_default_order() {
+    let nums = [5, 3, 9, 1, 3, 7, 0];
+    let same = sort(nums);
+    assert(is_ascending(nums));
+    assert(len(nums) == 7);
+    assert(nums[0] == 0);
+    assert(nums[6] == 9);
+
+    # sorts in place and hands back the very same array
+    assert(same == nums);
+
+    # mixed integers and floats compare numerically
+    let mixed = [2.5, 1, 3.75, 0, 2];
+    sort(mixed);
+    assert(mixed[0] == 0);
+    assert(mixed[1] == 1);
+    assert(mixed[2] == 2);
+    assert(mixed[3] == 2.5);
+    assert(mixed[4] == 3.75);
+
+    # strings sort by strcmp, even though '<' does not accept strings
+    let words = ["pear", "apple", "fig", "apple"];
+    sort(words);
+    assert(words[0] == "apple");
+    assert(words[1] == "apple");
+    assert(words[2] == "fig");
+    assert(words[3] == "pear");
+
+    # degenerate sizes
+    let empty = [];
+    sort(empty);
+    assert(len(empty) == 0);
+
+    let one = [42];
+    sort(one);
+    assert(one[0] == 42);
+
+    # already sorted, and reversed
+    let asc = [1, 2, 3, 4, 5];
+    sort(asc);
+    assert(is_ascending(asc));
+
+    let desc = [5, 4, 3, 2, 1];
+    sort(desc);
+    assert(is_ascending(desc));
+
+    # all equal
+    let flat = [7, 7, 7, 7];
+    sort(flat);
+    assert(flat[0] == 7 && flat[3] == 7);
+}
+
+fn test_comparator() {
+    let a = [1, 2, 3, 4, 5];
+    sort(a, fn(x, y) { return x > y; });
+    assert(a[0] == 5);
+    assert(a[4] == 1);
+
+    # a null comparator means "use the default order"
+    let b = [3, 1, 2];
+    sort(b, null);
+    assert(is_ascending(b));
+
+    # sorting maps by a field is the case a comparator exists for
+    let people = [
+        {"name": "carol", "age": 31},
+        {"name": "alice", "age": 24},
+        {"name": "bob", "age": 45}
+    ];
+    sort(people, fn(x, y) { return x.age < y.age; });
+    assert(people[0].name == "alice");
+    assert(people[1].name == "carol");
+    assert(people[2].name == "bob");
+
+    # a C function works as a comparator too
+    let strs = ["bb", "a", "ccc"];
+    sort(strs, fn(x, y) { return len(x) < len(y); });
+    assert(strs[0] == "a");
+    assert(strs[2] == "ccc");
+}
+
+fn test_stability() {
+    # equal keys must keep their original relative order
+    let pairs = [[2, "a"], [1, "b"], [2, "c"], [1, "d"], [2, "e"]];
+    sort(pairs, fn(x, y) { return x[0] < y[0]; });
+
+    let out = "";
+    let i = 0;
+    while (i < len(pairs)) {
+        out = out + pairs[i][1];
+        i = i + 1;
+    }
+    assert(out == "bdace");
+}
+
+fn test_errors() {
+    # a non-array, and a non-function comparator
+    assert(pcall(sort, 5).ok == false);
+    assert(pcall(sort, [1, 2], 7).ok == false);
+
+    # no defensible order between these two
+    let mixed = pcall(sort, [1, "a"]);
+    assert(mixed.ok == false);
+
+    let maps = pcall(sort, [{"a": 1}, {"b": 2}]);
+    assert(maps.ok == false);
+
+    # an error raised inside the comparator comes back out
+    let boom = pcall(fn() {
+        return sort([3, 1, 2], fn(x, y) { return error("comparator exploded"); });
+    });
+    assert(boom.ok == false);
+    assert(string_find(boom.error, "comparator exploded") >= 0);
+
+    # a comparator that resizes the array under the sort is caught rather
+    # than left to shuffle indices that no longer mean anything
+    let grow = [3, 1, 2, 5, 4];
+    let resized = pcall(fn() {
+        return sort(grow, fn(x, y) { append(grow, 9); return x < y; });
+    });
+    assert(resized.ok == false);
+    assert(string_find(resized.error, "resized") >= 0);
+
+    # the interpreter is still healthy after all of that
+    let after = [3, 1, 2];
+    sort(after);
+    assert(is_ascending(after));
+}
+
+fn test_gc_safety() {
+    #- The values being sorted are only ever reachable through the array, so
+       a comparator that allocates -- and forces a full collection -- must
+       not be able to get them collected. -#
+    let n = 200;
+    let a = [];
+    math_randomseed(7);
+    let i = 0;
+    while (i < n) {
+        append(a, string_rep("x", math_random(1, 30)) + "|" + i);
+        i = i + 1;
+    }
+
+    sort(a, fn(x, y) {
+        let junk = [x + "-", y + "-", {"a": x, "b": y}];
+        gc();
+        return len(x) < len(y);
+    });
+
+    assert(len(a) == n);
+    i = 1;
+    while (i < n) {
+        assert(len(a[i - 1]) <= len(a[i]));
+        assert(string_find(a[i], "|") >= 0);   # still an intact string
+        i = i + 1;
+    }
+}
+
+fn test_larger() {
+    let a = [];
+    math_randomseed(1234);
+    let i = 0;
+    while (i < 5000) {
+        append(a, math_random(1, 100000));
+        i = i + 1;
+    }
+    sort(a);
+    assert(len(a) == 5000);
+    assert(is_ascending(a));
+}
+
+fn main() {
+    test_default_order();
+    test_comparator();
+    test_stability();
+    test_errors();
+    test_gc_safety();
+    test_larger();
+    print("ok\n");
+}

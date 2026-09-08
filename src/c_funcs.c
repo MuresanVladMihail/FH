@@ -733,10 +733,14 @@ static int fn_math_random(struct fh_program *prog, struct fh_value *ret, struct 
     if (n_args > 2)
         return fh_set_error(prog, "math_random(): expected 0, 1 or 2 arguments");
 
-    /* math_random() -> float [0,1) */
+    /* math_random() -> float [0,1)
+     *
+     * Dividing by 2^32 (not UINT32_MAX) is what keeps 1.0 out of the range:
+     * with UINT32_MAX as the divisor, drawing UINT32_MAX returned exactly
+     * 1.0, and `math_random() * n` could then hand back n itself. */
     if (n_args == 0) {
         const uint32_t r = mt19937_next32(mt19937_generator);
-        *ret = fh_make_float((double) r / (double) UINT32_MAX);
+        *ret = fh_make_float((double) r / 4294967296.0);
         return 0;
     }
 
@@ -753,7 +757,7 @@ static int fn_math_random(struct fh_program *prog, struct fh_value *ret, struct 
             return fh_set_error(prog, "math_random(): argument must be > 0");
 
         const uint32_t r = rand_uniform((uint32_t) max);
-        *ret = fh_make_float((double) (r + 1));
+        *ret = fh_new_integer((int64_t) r + 1);
         return 0;
     }
 
@@ -775,7 +779,7 @@ static int fn_math_random(struct fh_program *prog, struct fh_value *ret, struct 
 
     const uint32_t r = rand_uniform(range);
 
-    *ret = fh_make_float((double) (min + r));
+    *ret = fh_new_integer((int64_t) min + (int64_t) r);
     return 0;
 }
 
@@ -784,6 +788,8 @@ static int fn_math_randomseed(struct fh_program *prog, struct fh_value *ret, str
 
     if (n_args == 0) {
         seed = (uint32_t) time(NULL);
+    } else if (n_args == 1 && fh_is_integer(&args[0])) {
+        seed = (uint32_t) fh_get_integer(&args[0]);
     } else if (n_args == 1 && fh_is_float(&args[0])) {
         seed = (uint32_t) fh_get_float(&args[0]);
     } else {
@@ -1619,6 +1625,98 @@ static int fn_string_reverse(struct fh_program *prog, struct fh_value *ret, stru
     return 0;
 }
 
+/* string_rep(s, n [, sep]) -- s repeated n times, with sep between copies.
+ * Modelled on Lua's string.rep; n <= 0 gives the empty string. */
+static int fn_string_rep(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    if (n_args < 2 || n_args > 3)
+        return fh_set_error(prog, "string_rep(): expected 2 or 3 arguments (string, count [, separator])");
+
+    if (!fh_is_string(&args[0]))
+        return fh_set_error(prog, "string_rep(): argument 1 must be a string, got %s",
+                            fh_type_to_str(prog, args[0].type));
+
+    int32_t count32;
+    if (fh_arg_int32(prog, &args[1], "string_rep()", 1, &count32) < 0)
+        return -1;
+
+    const char *sep = "";
+    if (n_args == 3) {
+        if (!fh_is_string(&args[2]))
+            return fh_set_error(prog, "string_rep(): argument 3 must be a string, got %s",
+                                fh_type_to_str(prog, args[2].type));
+        sep = GET_VAL_STRING_DATA(&args[2]);
+    }
+
+    if (count32 <= 0) {
+        *ret = fh_new_string(prog, "");
+        return 0;
+    }
+
+    const char *str = GET_VAL_STRING_DATA(&args[0]);
+    const size_t len = strlen(str);
+    const size_t sep_len = strlen(sep);
+    const size_t n = (size_t) count32;
+
+    /* n * (len + sep_len) can wrap on a 32-bit size_t long before malloc has
+     * a chance to fail, so check the multiplication itself. */
+    const size_t per_copy = len + sep_len;
+    if (per_copy != 0 && n > (SIZE_MAX - 1) / per_copy)
+        return fh_set_error(prog, "string_rep(): resulting string is too large");
+
+    const size_t total = n * len + (n - 1) * sep_len;
+    char *res = malloc(total + 1);
+    if (!res) return fh_set_error(prog, "string_rep(): out of memory");
+
+    char *w = res;
+    for (size_t i = 0; i < n; i++) {
+        if (i > 0 && sep_len) {
+            memcpy(w, sep, sep_len);
+            w += sep_len;
+        }
+        memcpy(w, str, len);
+        w += len;
+    }
+    *w = '\0';
+
+    *ret = fh_new_string(prog, res);
+    free(res);
+    return 0;
+}
+
+static int fn_string_starts_with(struct fh_program *prog, struct fh_value *ret,
+                                 struct fh_value *args, int n_args) {
+    if (check_n_args(prog, "string_starts_with()", 2, n_args))
+        return -1;
+
+    if (!fh_is_string(&args[0]) || !fh_is_string(&args[1]))
+        return fh_set_error(prog, "string_starts_with(): expected two strings");
+
+    const char *str = GET_VAL_STRING_DATA(&args[0]);
+    const char *prefix = GET_VAL_STRING_DATA(&args[1]);
+    const size_t prefix_len = strlen(prefix);
+
+    *ret = fh_new_bool(strlen(str) >= prefix_len && memcmp(str, prefix, prefix_len) == 0);
+    return 0;
+}
+
+static int fn_string_ends_with(struct fh_program *prog, struct fh_value *ret,
+                               struct fh_value *args, int n_args) {
+    if (check_n_args(prog, "string_ends_with()", 2, n_args))
+        return -1;
+
+    if (!fh_is_string(&args[0]) || !fh_is_string(&args[1]))
+        return fh_set_error(prog, "string_ends_with(): expected two strings");
+
+    const char *str = GET_VAL_STRING_DATA(&args[0]);
+    const char *suffix = GET_VAL_STRING_DATA(&args[1]);
+    const size_t str_len = strlen(str);
+    const size_t suffix_len = strlen(suffix);
+
+    *ret = fh_new_bool(str_len >= suffix_len &&
+                       memcmp(str + str_len - suffix_len, suffix, suffix_len) == 0);
+    return 0;
+}
+
 static char *substr(char const *input, size_t start, size_t len) {
     char *ret = malloc(len + 1);
     if (!ret) return NULL;
@@ -2097,6 +2195,54 @@ static int fn_os_difftime(struct fh_program *prog, struct fh_value *ret, struct 
     return 0;
 }
 
+/* os_clock() -- CPU time used by the process, in seconds, like Lua's
+ * os.clock(). Only differences between two readings are meaningful. */
+static int fn_os_clock(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    UNUSED(args);
+    FH_REQUIRE_EXACT_ARGS(prog, "os_clock()", 0, n_args);
+
+    const clock_t c = clock();
+    if (c == (clock_t) -1)
+        return fh_set_error(prog, "os_clock(): CPU time is not available on this platform");
+
+    *ret = fh_make_float((double) c / (double) CLOCKS_PER_SEC);
+    return 0;
+}
+
+/* os_monotonic() -- seconds from a monotonic clock, as a float.
+ *
+ * This is the one to time a benchmark with: unlike os_time() it never jumps
+ * when the wall clock is adjusted, it has nanosecond resolution where the
+ * platform offers it, and it needs no c_obj allocation per reading. */
+static int fn_os_monotonic(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    UNUSED(args);
+    FH_REQUIRE_EXACT_ARGS(prog, "os_monotonic()", 0, n_args);
+
+#if defined(FH_OS_WINDOWS)
+    LARGE_INTEGER freq, counter;
+    if (QueryPerformanceFrequency(&freq) && QueryPerformanceCounter(&counter) && freq.QuadPart != 0) {
+        *ret = fh_make_float((double) counter.QuadPart / (double) freq.QuadPart);
+        return 0;
+    }
+#elif defined(CLOCK_MONOTONIC)
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+        *ret = fh_make_float((double) ts.tv_sec + (double) ts.tv_nsec / 1e9);
+        return 0;
+    }
+#endif
+
+    /* No monotonic source: fall back to the wall clock rather than failing,
+     * so a benchmark script still runs (it is just adjustment-sensitive). */
+    {
+        struct timeval tv;
+        if (gettimeofday(&tv, NULL) != 0)
+            return fh_set_error(prog, "os_monotonic(): no clock available on this platform");
+        *ret = fh_make_float((double) tv.tv_sec + (double) tv.tv_usec / 1e6);
+        return 0;
+    }
+}
+
 static int fn_os_localtime(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
     UNUSED(args);
     FH_REQUIRE_EXACT_ARGS(prog, "os_localtime()", 0, n_args);
@@ -2423,6 +2569,286 @@ static int fn_error(struct fh_program *prog, struct fh_value *ret, struct fh_val
     char buf[256];
     fh_value_repr(prog, &args[0], buf, sizeof(buf));
     return fh_set_error(prog, "%s", buf);
+}
+
+/* setproto(map, proto_or_null) -- give `map` a prototype, and return `map`.
+ *
+ * A key that `map` does not have is then looked up in `proto`, and in its
+ * prototype in turn: the same job Lua gives `__index`, minus the metatable
+ * around it. The prototype lives in a slot on the map rather than under a
+ * reserved key, so it never shows up in next_key() or json_stringify() --
+ * an object should not serialize the class it was made from.
+ *
+ * What this buys is one shared copy of an object's methods instead of a
+ * fresh closure per method per instance.
+ */
+static int fn_setproto(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    if (check_n_args(prog, "setproto()", 2, n_args))
+        return -1;
+
+    if (args[0].type != FH_VAL_MAP)
+        return fh_set_error(prog, "setproto(): argument 1 must be a map, got %s",
+                            fh_type_to_str(prog, args[0].type));
+
+    struct fh_map *map = GET_OBJ_MAP(args[0].data.obj);
+
+    if (args[1].type == FH_VAL_NULL) {
+        map->proto = NULL;
+        *ret = args[0];
+        return 0;
+    }
+
+    if (args[1].type != FH_VAL_MAP)
+        return fh_set_error(prog, "setproto(): argument 2 must be a map or null, got %s",
+                            fh_type_to_str(prog, args[1].type));
+
+    struct fh_map *proto = GET_OBJ_MAP(args[1].data.obj);
+
+    /* Reject a cycle here rather than letting every later lookup walk into
+     * it. The existing chain is acyclic, so following it once is enough. */
+    for (struct fh_map *p = proto; p; p = p->proto) {
+        if (p == map)
+            return fh_set_error(prog, "setproto(): that would make a prototype cycle");
+    }
+
+    map->proto = proto;
+    *ret = args[0];
+    return 0;
+}
+
+/* getproto(map) -- the map's prototype, or null if it has none. */
+static int fn_getproto(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    if (check_n_args(prog, "getproto()", 1, n_args))
+        return -1;
+
+    if (args[0].type != FH_VAL_MAP)
+        return fh_set_error(prog, "getproto(): argument 1 must be a map, got %s",
+                            fh_type_to_str(prog, args[0].type));
+
+    struct fh_map *proto = GET_OBJ_MAP(args[0].data.obj)->proto;
+    if (!proto) {
+        *ret = fh_new_null();
+        return 0;
+    }
+
+    ret->type = FH_VAL_MAP;
+    ret->data.obj = proto;
+    return 0;
+}
+
+/* sort(array [, comparator]) -- sort an array in place, and return it.
+ *
+ * Without a comparator, numbers sort numerically and strings sort by
+ * strcmp(); a mix of the two (or anything else) is an error, because there
+ * is no defensible order between a number and a map. With one,
+ * `comparator(a, b)` is asked whether a must come *before* b, which is Lua's
+ * table.sort convention.
+ *
+ * Two properties are worth the machinery below.
+ *
+ * It is a stable bottom-up merge sort, which is what a script actually wants
+ * when it sorts by one field after another. Merge sort also costs about half
+ * the comparisons of a heapsort, and every comparison here can be a full VM
+ * call -- that is the whole cost of the operation.
+ *
+ * And it sorts a permutation of *indices*, not the values: the values never
+ * leave arr->items, which the collector reaches through the caller's
+ * register. A merge sort that moved fh_values through a malloc'd scratch
+ * buffer would be holding the only reference to them somewhere the GC does
+ * not walk, and a comparator that allocates would collect them.
+ */
+
+struct sort_ctx {
+    struct fh_program *prog;
+    struct fh_array *arr;
+    uint32_t len; /* the length the sort started with */
+    struct fh_value comparator; /* null when there is none */
+    bool has_comparator;
+};
+
+/* Ordering used when no comparator was given. Returns 1 for a < b, 0 for
+ * not, -1 for "these two cannot be compared" (with the error set). */
+static int sort_default_less(struct sort_ctx *ctx, const struct fh_value *a, const struct fh_value *b,
+                             int *out_less) {
+    if (fh_is_number(a) && fh_is_number(b)) {
+        if (fh_is_integer(a) && fh_is_integer(b))
+            *out_less = (a->data.i < b->data.i);
+        else {
+            const double da = fh_is_integer(a) ? (double) a->data.i : a->data.num;
+            const double db = fh_is_integer(b) ? (double) b->data.i : b->data.num;
+            *out_less = (da < db);
+        }
+        return 0;
+    }
+
+    if (fh_is_string(a) && fh_is_string(b)) {
+        const char *sa = GET_OBJ_STRING_DATA(a->data.obj);
+        const char *sb = GET_OBJ_STRING_DATA(b->data.obj);
+        *out_less = (strcmp(sa, sb) < 0);
+        return 0;
+    }
+
+    return fh_set_error(ctx->prog, "sort(): don't know how to order %s against %s "
+                        "(pass a comparator function)",
+                        fh_type_to_str(ctx->prog, a->type),
+                        fh_type_to_str(ctx->prog, b->type));
+}
+
+/* Is items[ia] < items[ib]? 1 yes, 0 no, -1 error. */
+static int sort_less(struct sort_ctx *ctx, uint32_t ia, uint32_t ib, int *out_less) {
+    /* arr->items can have moved since the last comparison: a comparator is
+     * free to append to the array. Re-read it every time. */
+    const struct fh_value *items = ctx->arr->items;
+    const struct fh_value a = items[ia];
+    const struct fh_value b = items[ib];
+
+    if (!ctx->has_comparator)
+        return sort_default_less(ctx, &a, &b, out_less);
+
+    struct fh_value cmp_args[2] = {a, b};
+    struct fh_value cmp_ret = fh_new_null();
+    int r;
+
+    if (ctx->comparator.type == FH_VAL_CLOSURE) {
+        r = fh_call_vm_function(&ctx->prog->vm, GET_OBJ_CLOSURE(ctx->comparator.data.obj),
+                                cmp_args, 2, &cmp_ret);
+    } else {
+        r = ctx->comparator.data.c_func(ctx->prog, &cmp_ret, cmp_args, 2);
+    }
+    if (r < 0)
+        return -1;
+
+    /* The comparator ran arbitrary script. If it resized the array, every
+     * index the sort is carrying is now meaningless -- stop rather than
+     * shuffle whatever is left. */
+    if (ctx->arr->len != ctx->len)
+        return fh_set_error(ctx->prog, "sort(): the array was resized while it was being sorted");
+
+    *out_less = fh_is_truthy(&cmp_ret) ? 1 : 0;
+    return 0;
+}
+
+/* One merge pass over [lo, mid) and [mid, hi) of src, into dst. */
+static int sort_merge(struct sort_ctx *ctx, const uint32_t *src, uint32_t *dst,
+                      uint32_t lo, uint32_t mid, uint32_t hi) {
+    uint32_t i = lo, j = mid, k = lo;
+
+    while (i < mid && j < hi) {
+        int less = 0;
+        /* Ask whether the *right* element is strictly smaller: when it is
+         * not, the left one goes first, which is what keeps equal elements
+         * in their original order. */
+        if (sort_less(ctx, src[j], src[i], &less) < 0)
+            return -1;
+        dst[k++] = less ? src[j++] : src[i++];
+    }
+    while (i < mid) dst[k++] = src[i++];
+    while (j < hi) dst[k++] = src[j++];
+    return 0;
+}
+
+static int fn_sort(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    if (n_args < 1 || n_args > 2)
+        return fh_set_error(prog, "sort(): expected 1 or 2 arguments (array [, comparator])");
+
+    if (args[0].type != FH_VAL_ARRAY)
+        return fh_set_error(prog, "sort(): argument 1 must be an array, got %s",
+                            fh_type_to_str(prog, args[0].type));
+
+    struct sort_ctx ctx;
+    ctx.prog = prog;
+    ctx.arr = GET_OBJ_ARRAY(args[0].data.obj);
+    ctx.len = ctx.arr->len;
+    ctx.comparator = fh_new_null();
+    ctx.has_comparator = false;
+
+    if (n_args == 2 && args[1].type != FH_VAL_NULL) {
+        if (args[1].type != FH_VAL_CLOSURE && args[1].type != FH_VAL_C_FUNC)
+            return fh_set_error(prog, "sort(): argument 2 must be a function, got %s",
+                                fh_type_to_str(prog, args[1].type));
+        ctx.comparator = args[1];
+        ctx.has_comparator = true;
+    }
+
+    /* args[] points into the VM value stack, which a comparator call can
+     * realloc out from under us; everything read from it is copied above.
+     * The array itself stays a GC root through the caller's register. */
+    const struct fh_value arr_val = args[0];
+    const uint32_t n = ctx.len;
+
+    *ret = arr_val;
+    if (n < 2)
+        return 0;
+
+    if (n > (uint32_t) (SIZE_MAX / sizeof(uint32_t)) / 2)
+        return fh_set_error(prog, "sort(): array is too large to sort");
+
+    uint32_t *idx = malloc((size_t) n * sizeof(uint32_t));
+    uint32_t *buf = malloc((size_t) n * sizeof(uint32_t));
+    if (!idx || !buf) {
+        free(idx);
+        free(buf);
+        return fh_set_error(prog, "sort(): out of memory");
+    }
+    for (uint32_t i = 0; i < n; i++)
+        idx[i] = i;
+
+    /* A comparator can leave vm->pc pointing into its own function; the
+     * traceback for a later error is rendered from it. Put it back. */
+    uint32_t *saved_pc = prog->vm.pc;
+
+    int failed = 0;
+    for (uint32_t width = 1; width < n && !failed; width *= 2) {
+        for (uint32_t lo = 0; lo < n; lo += 2 * width) {
+            const uint32_t mid = (lo + width < n) ? lo + width : n;
+            const uint32_t hi = (lo + 2 * width < n) ? lo + 2 * width : n;
+            if (sort_merge(&ctx, idx, buf, lo, mid, hi) < 0) {
+                failed = 1;
+                break;
+            }
+        }
+        if (failed)
+            break;
+        uint32_t *swap = idx;
+        idx = buf;
+        buf = swap;
+    }
+
+    prog->vm.pc = saved_pc;
+
+    if (failed) {
+        free(idx);
+        free(buf);
+        return -1;
+    }
+
+    /* Apply the permutation in place, cycle by cycle: idx[i] is the slot the
+     * value for position i is currently in. Nothing here allocates or calls
+     * back into the VM, so the one value held in `tmp` cannot be collected
+     * while it is out of the array. */
+    struct fh_value *items = ctx.arr->items;
+    for (uint32_t i = 0; i < n; i++) {
+        if (idx[i] == i)
+            continue;
+
+        const struct fh_value tmp = items[i];
+        uint32_t j = i;
+        for (;;) {
+            const uint32_t k = idx[j];
+            idx[j] = j;
+            if (k == i)
+                break;
+            items[j] = items[k];
+            j = k;
+        }
+        items[j] = tmp;
+    }
+
+    free(idx);
+    free(buf);
+
+    *ret = arr_val;
+    return 0;
 }
 
 /* pcall(f [, args...]) -- call f, and come back with the error instead of dying.
@@ -2908,8 +3334,13 @@ const struct fh_named_c_func fh_std_c_funcs[] = {
     DEF_FN(string_trim),
     DEF_FN(string_format),
     DEF_FN(string_join),
+    DEF_FN(string_rep),
+    DEF_FN(string_starts_with),
+    DEF_FN(string_ends_with),
 
     DEF_FN(os_time),
+    DEF_FN(os_clock),
+    DEF_FN(os_monotonic),
     DEF_FN(os_difftime),
     DEF_FN(os_localtime),
     DEF_FN(os_command),
@@ -2938,6 +3369,9 @@ const struct fh_named_c_func fh_std_c_funcs[] = {
     DEF_FN(next_key),
     DEF_FN(contains_key),
     DEF_FN(reserve),
+    DEF_FN(sort),
+    DEF_FN(setproto),
+    DEF_FN(getproto),
     DEF_FN(delete),
 
     DEF_FN(json_parse),

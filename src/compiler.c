@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 #include "compiler.h"
 #include "stack.h"
@@ -1105,6 +1106,10 @@ static int try_fold_const_bin_op(struct fh_compiler *c, struct fh_src_loc loc,
                 if (right_val == 0.0) return -1;
                 result = left_val / right_val;
                 break;
+            case '%':
+                if (right_val == 0.0) return -1;
+                result = fmod(left_val, right_val);
+                break;
             case AST_OP_LT: result = (left_val < right_val); break;
             case AST_OP_GT: result = (left_val > right_val); break;
             case AST_OP_LE: result = (left_val <= right_val); break;
@@ -1235,12 +1240,15 @@ static int compile_bin_op_to_reg(struct fh_compiler *c, struct fh_src_loc loc, s
             break;
 
         case '%':
-            // MOD is int-only in your VM
-            if (require_int_operands_if_known(c, loc, "mod", hl, hr) < 0)
-                return -1;
-
+            /* int % int stays integer; anything with a known float in it
+             * comes back as a float (the VM falls back to fmod). */
             opc = OPC_MOD;
-            set_reg_hint(fi, dest_reg, H_INT);
+            if (hl == H_INT && hr == H_INT)
+                set_reg_hint(fi, dest_reg, H_INT);
+            else if (hl == H_FLOAT || hr == H_FLOAT)
+                set_reg_hint(fi, dest_reg, H_FLOAT);
+            else
+                set_reg_hint(fi, dest_reg, H_UNKNOWN);
             break;
 
         case '|':
@@ -1569,6 +1577,52 @@ static int compile_func_call(struct fh_compiler *c, struct fh_src_loc loc, struc
     return func_reg;
 }
 
+/* object:method(a, b) -- fetch object.method and call it with the object
+ * itself in front of the given arguments.
+ *
+ * The call convention wants [callee][arg0][arg1]... in consecutive
+ * registers, and arg0 here *is* the object -- so the object is compiled
+ * straight into its slot as arg0, and the method is then read out of that
+ * register into the callee slot. The object expression is evaluated once,
+ * which is the whole reason this is a node of its own instead of sugar for
+ * `obj.method(obj, ...)`.
+ */
+static int compile_method_call(struct fh_compiler *c, struct fh_src_loc loc,
+                               struct fh_p_expr_method_call *expr) {
+    const int n_args = fh_expr_list_size(expr->arg_list);
+
+    /* callee + the object + the explicit arguments */
+    const int func_reg = alloc_n_regs(c, loc, n_args + 2);
+    if (func_reg < 0)
+        return -1;
+
+    const int self_reg = func_reg + 1;
+    if (compile_expr_to_reg(c, expr->object, self_reg) < 0)
+        return -1;
+
+    const int method_rk = compile_expr(c, expr->method);
+    if (method_rk < 0)
+        return -1;
+
+    if (add_instr(c, loc, MAKE_INSTR_ABC(OPC_GETEL, func_reg, self_reg, method_rk)) < 0)
+        return -1;
+
+    int reg = self_reg + 1;
+    for (struct fh_p_expr *e = expr->arg_list; e != NULL; e = e->next) {
+        if (compile_expr_to_reg(c, e, reg++) < 0)
+            return -1;
+    }
+
+    if (add_instr(c, loc, MAKE_INSTR_AB(OPC_CALL, func_reg, n_args + 1)) < 0)
+        return -1;
+    c->last_func_call = loc;
+
+    for (int i = 1; i < n_args + 2; i++)
+        free_reg(c, loc, func_reg + i);
+
+    return func_reg;
+}
+
 static int compile_index_to_reg(struct fh_compiler *c, struct fh_src_loc loc, struct fh_p_expr_index *expr,
                                 int dest_reg) {
     int container_rk = compile_expr(c, expr->container);
@@ -1795,6 +1849,7 @@ static int compile_expr(struct fh_compiler *c, struct fh_p_expr *expr) {
         case EXPR_BIN_OP: return compile_bin_op(c, expr->loc, &expr->data.bin_op);
         case EXPR_UN_OP: return compile_un_op(c, expr->loc, &expr->data.un_op);
         case EXPR_FUNC_CALL: return compile_func_call(c, expr->loc, &expr->data.func_call);
+        case EXPR_METHOD_CALL: return compile_method_call(c, expr->loc, &expr->data.method_call);
         case EXPR_ARRAY_LIT: return compile_array_lit(c, expr->loc, &expr->data.array_lit);
         case EXPR_MAP_LIT: return compile_map_lit(c, expr->loc, &expr->data.map_lit);
         case EXPR_INDEX: return compile_index(c, expr->loc, &expr->data.index);

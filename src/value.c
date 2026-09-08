@@ -204,6 +204,7 @@ struct fh_map *fh_make_map(struct fh_program *prog, const bool pinned) {
     map->len = 0;
     map->cap = 0;
     map->entries = NULL;
+    map->proto = NULL;
     return map;
 }
 
