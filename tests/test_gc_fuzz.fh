@@ -1,0 +1,135 @@
+#-
+Randomised mixed-workload stress for the collector.
+
+Every iteration picks one of twelve operations at random, so allocation,
+mutation, iteration, collection, error handling and callbacks into C
+interleave in orders no hand-written test would produce. The workload checks
+its own bookkeeping on every step, so a value that got collected while it was
+still live shows up as a wrong count or a wrong field rather than as a crash
+somewhere later.
+
+Seeds are fixed, so a failure here is reproducible. Run it under
+`make TARGETS=gcdebug` as well -- there the root verifier checks, before
+every mark, that no root has gone stale, which is the failure mode this
+workload is really hunting.
+-#
+
+fn make_obj(i) {
+    return {"id": i, "name": "obj-" + i, "vals": [i, i * 2, i * 3]};
+}
+
+fn make_closure(i) {
+    let captured = [i, "cap-" + i];
+    return fn() { return captured[0]; };
+}
+
+fn fuzz_round(seed, iterations) {
+    math_randomseed(seed);
+    gc_frequency(1024);
+
+    let objs = [];
+    let maps = {};
+    let fns = [];
+    let strs = [];
+    let n_objs = 0;
+    let n_fns = 0;
+    let n_keys = 0;
+
+    let iter = 0;
+    while (iter < iterations) {
+        let op = math_random(1, 12);
+
+        if (op == 1) {
+            append(objs, make_obj(iter));
+            n_objs = n_objs + 1;
+        }
+        if (op == 2) {
+            maps["k" + iter] = make_obj(iter);
+            n_keys = n_keys + 1;
+        }
+        if (op == 3) {
+            append(fns, make_closure(iter));
+            n_fns = n_fns + 1;
+        }
+        if (op == 4) {
+            append(strs, string_upper("s" + iter) + string_rep("-", 2));
+        }
+        if (op == 5 && len(objs) > 0) {
+            # read back a live object: its fields must still be intact
+            let o = objs[math_random(1, len(objs)) - 1];
+            assert(o.name == "obj-" + o.id);
+            assert(o.vals[2] == o.id * 3);
+        }
+        if (op == 6 && len(fns) > 0) {
+            # a closure whose frame returned long ago
+            let got = fns[math_random(1, len(fns)) - 1]();
+            assert(type(got) == "integer");
+        }
+        if (op == 7) {
+            gc();
+        }
+        if (op == 8 && len(objs) > 20) {
+            objs = [];
+            n_objs = 0;
+        }
+        if (op == 9 && n_keys > 0) {
+            let k = next_key(maps, null);
+            if (k != null) {
+                delete(maps, k);
+                n_keys = n_keys - 1;
+            }
+        }
+        if (op == 10 && len(strs) > 30) {
+            # sort() runs script from inside a C frame
+            sort(strs);
+            let j = 1;
+            while (j < len(strs)) {
+                assert(sort([strs[j - 1], strs[j]])[0] == strs[j - 1]);
+                j = j + 1;
+            }
+            strs = [];
+        }
+        if (op == 11) {
+            let r = pcall(fn() { return error("planned " + iter); });
+            assert(r.ok == false);
+        }
+        if (op == 12) {
+            # a cycle created and dropped in the same breath
+            let n = make_obj(iter);
+            n.self = n;
+            n.peer = {"back": n};
+        }
+
+        assert(len(objs) == n_objs);
+        assert(len(fns) == n_fns);
+        assert(len(maps) == n_keys);
+
+        iter = iter + 1;
+    }
+
+    gc();
+    gc();
+
+    # everything retained is still readable after the final collections
+    let i = 0;
+    while (i < len(objs)) {
+        assert(objs[i].name == "obj-" + objs[i].id);
+        i = i + 1;
+    }
+    i = 0;
+    while (i < len(fns)) {
+        assert(type(fns[i]()) == "integer");
+        i = i + 1;
+    }
+
+    gc_frequency(1000000);
+    return len(objs) + len(fns) + len(maps);
+}
+
+fn main() {
+    assert(fuzz_round(1, 20000) >= 0);
+    assert(fuzz_round(7, 20000) >= 0);
+    assert(fuzz_round(12345, 20000) >= 0);
+    assert(fuzz_round(999983, 20000) >= 0);
+    print("ok\n");
+}

@@ -101,10 +101,22 @@ the invariant it is:
   caller's live locals on any collection triggered from inside an allocating
   builtin, and the stale slots then crashed the *next* collection.
 
-*Testing the collector.* `make TARGETS=gcdebug` builds with `-DFH_GC_DEBUG`
-(asan plus a root verifier that checks, before every mark, that each root
-still points at a live object). It turns "segfaults one run in five" into a
-deterministic labelled report on stderr. `run_tests.sh` fails any test whose
+Two pinning mechanisms exist and they are not interchangeable.
+`fh_make_object(pinned=true)` pushes the object onto `pinned_objs`, which is
+a **root**: the object is marked, and so are its children.
+`GC_PIN_OBJ()`/`GC_UNPIN_OBJ()` set a bit that only makes `sweep()` keep the
+object — it is never traversed, so anything reachable *only* through a
+bit-pinned object is still collected. That is safe where it is used today
+(`op_CLOSURE`, `op_NEWARRAY`, `op_NEWMAP` pin a half-built object whose
+children are separately reachable from registers) and a trap anywhere else.
+
+*Testing the collector.* `make TARGETS=gcdebug` builds with `-DFH_GC_DEBUG`:
+asan, plus a root verifier that checks before every mark that each root still
+points at a live object, plus poisoning of small-pool blocks on both
+allocation and free. The verifier turns "segfaults one run in five" into a
+deterministic labelled report on stderr; the poison turns a field an
+allocator forgot to initialise into a wild pointer instead of the previous
+object's plausible-looking one. `run_tests.sh` fails any test whose
 output contains `GC ERROR` or `**** ERROR`, so a test cannot pass by printing
 "ok" on a heap it has already corrupted. `tests/test_gc_stress.fh` leans on
 the collector from every direction and pins the regressions above; run the
@@ -115,6 +127,18 @@ result back across, so a live value can legitimately be owned by another
 program's heap (kept alive for the process lifetime in
 `fh_programs_vector`). The verifier knows about this; new root checks must
 too.
+
+*Writing a C function that allocates.* `fh_new_string`/`fh_new_array`/
+`fh_new_map` anchor what they build in `prog->c_vals`, which the VM releases
+on its next dispatch — the anchor is meant to last exactly one bytecode
+instruction. A C function that calls **back into the script**
+(`fh_call_vm_function`, as `pcall()` and `sort()` do) runs a nested
+`fh_run_vm`, and that loop dispatches. It only releases anchors added since
+*it* started (`c_vals_floor`), so values the outer C function had already
+built stay anchored; without that floor they are collected while it is still
+using them. If a C function instead holds a value across a callback in some
+other way, it is responsible for keeping it reachable itself
+(`fh_get_pin_state`/`fh_restore_pin_state`, or a VM stack slot).
 
 **Type Hints & Optimizations** (`src/compiler.c`)
 - Compiler tracks type hints (H_INT, H_FLOAT, H_UNKNOWN) for registers

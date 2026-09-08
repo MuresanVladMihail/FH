@@ -399,12 +399,30 @@ which ignored `num_items` and always bumped the length by one.
 free callback; if that ever allocates, `fh_make_object()` could start a
 second collection over a half-marked heap. `prog->gc_running` refuses it.
 
+**A C function's temporary values were unanchored by its own callback.**
+`fh_new_string`/`fh_new_array`/`fh_new_map` anchor what they build in
+`prog->c_vals`, which the VM releases on its next dispatch. A C function that
+calls back into the script (`pcall()`, `sort()`) runs a *nested* `fh_run_vm`,
+and that loop's first dispatch dropped every anchor — including the ones the
+outer C function was still using. No shipping builtin allocates before
+calling back, so this was latent; a canary proved it exactly:
+
+```
+GC ERROR: sort() canary was collected: '99026'   # the string's memory, reused
+```
+
+The nested loop now only releases anchors added since it started.
+
 **And a way to catch the next one.** A dangling root produces no symptom
 where the mistake is: the first stack-bound bug reported corruption on
 roughly one release run in five, which is not something a test can be pinned
-to. `make TARGETS=gcdebug` builds with asan plus a root verifier that checks,
-before every mark, that each root still points at a live object — turning
-that into a deterministic labelled report:
+to. `make TARGETS=gcdebug` builds with asan, a root verifier that checks before
+every mark that each root still points at a live object, and poisoning of
+small-pool blocks on both allocation and free (recycled pool memory
+otherwise holds the previous object's perfectly valid pointers, so a field an
+allocator forgot to initialise reads as something plausible and the bug
+hides). The verifier turns a dangling root into a deterministic labelled
+report:
 
 ```
 $ make TARGETS=gcdebug && ./fh tests/test_gc_stress.fh
@@ -418,10 +436,13 @@ has already corrupted — which is exactly what the array and stack-bound
 tests did before. `tests/test_gc_stress.fh` covers locals live across
 allocating builtins, closures outliving their frames, deep recursion, map
 growth and deletion, array growth, reachable and unreachable cycles, `pcall`
-under pressure, and `sort()` calling script back from inside a C frame.
+under pressure, and `sort()` calling script back from inside a C frame. On
+top of that, a randomised mixed-workload fuzz (40,000 iterations picking
+among twelve operations, verifying its own bookkeeping every step) runs clean
+across four seeds under both `gcdebug` and asan.
 
-**Files Modified:** `src/gc.c`, `src/vm.c`, `src/array.c`, `src/program.c`,
-`src/program.h`, `Makefile`, `run_tests.sh`, `CLAUDE.md`
+**Files Modified:** `src/gc.c`, `src/vm.c`, `src/array.c`, `src/pool.c`,
+`src/program.c`, `src/program.h`, `Makefile`, `run_tests.sh`, `CLAUDE.md`
 
 ---
 

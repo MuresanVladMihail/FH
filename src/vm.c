@@ -740,6 +740,10 @@ int fh_run_vm(struct fh_vm *vm) {
     struct fh_vm_call_frame *frame = NULL;
     struct fh_value *stack = vm->stack;
 
+    /* Everything already anchored in prog->c_vals belongs to a C function
+     * further out that called back into the script; see CLEAR_C_VALS(). */
+    const size_t c_vals_floor = vm->prog->c_vals.length;
+
     uint32_t *pc = vm->pc;
     struct fh_value *reg_base = NULL;
     struct fh_value *const_base = NULL;
@@ -836,11 +840,17 @@ int fh_run_vm(struct fh_vm *vm) {
 // already been written into a VM register (itself a GC root), so it's
 // safe - and necessary, to avoid growing this vector for the life of the
 // program - to release every temp anchor added since the last dispatch.
+// Anchors below c_vals_floor were added by a C function further out -- one
+// that is still running, and that called back into the script (pcall(),
+// sort()). They are not this loop's to release: dropping them would leave
+// that function's half-built values unreachable while it is still building
+// them. No builtin allocates before calling back today; this makes sure the
+// first one that does is not a heap-corruption bug.
 #define CLEAR_C_VALS() do { \
-        if (vm->prog->c_vals.length) { \
-            for (size_t _cv_i = 0; _cv_i < vm->prog->c_vals.length; _cv_i++) \
+        if (vm->prog->c_vals.length > c_vals_floor) { \
+            for (size_t _cv_i = c_vals_floor; _cv_i < vm->prog->c_vals.length; _cv_i++) \
                 free(vm->prog->c_vals.data[_cv_i]); \
-            vm->prog->c_vals.length = 0; \
+            vm->prog->c_vals.length = c_vals_floor; \
         } \
     } while (0)
 
