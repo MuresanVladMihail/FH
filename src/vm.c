@@ -410,6 +410,31 @@ int fh_call_vm_function(struct fh_vm *vm, struct fh_closure *closure,
     return 0;
 }
 
+/* How far a prototype chain may go before we call it a cycle. Deep chains
+ * are a design smell anyway; a cycle would otherwise hang the VM. */
+#define FH_MAX_PROTO_DEPTH 32
+
+/* Read `key` out of a map, falling back to its prototype chain on a miss.
+ * Returns 0 on success (with *out set, null when nothing had the key), or -1
+ * with the VM error set when the chain is too deep. */
+static int map_get_through_proto(struct fh_vm *vm, const struct fh_value *map_val,
+                                 struct fh_value *key, struct fh_value *out) {
+    struct fh_map *m = GET_VAL_MAP(map_val);
+
+    for (int depth = 0; m; depth++) {
+        if (depth > FH_MAX_PROTO_DEPTH) {
+            vm_error(vm, "prototype chain is too long (a setproto() cycle?)");
+            return -1;
+        }
+        if (fh_get_map_object_value(m, key, out) >= 0)
+            return 0;
+        m = m->proto;
+    }
+
+    *out = fh_new_null();
+    return 0;
+}
+
 static bool fh_val_is_true(struct fh_value *val) {
     if (val->type == FH_VAL_UPVAL)
         val = GET_OBJ_UPVAL(val)->val;
@@ -931,9 +956,8 @@ op_GETEL_MAP: {
             goto op_GETEL;  // Type hint was wrong, use generic path
         }
 
-        if (fh_get_map_value(rb, rc, ra) < 0) {
-            *ra = fh_new_null();
-        }
+        if (map_get_through_proto(vm, rb, rc, ra) < 0)
+            goto user_err;
         DISPATCH();
     }
 
@@ -953,9 +977,8 @@ op_GETEL: {
                 break;
             }
             case FH_VAL_MAP: {
-                if (fh_get_map_value(rb, rc, ra) < 0) {
-                    *ra = fh_new_null();
-                }
+                if (map_get_through_proto(vm, rb, rc, ra) < 0)
+                    goto user_err;
                 break;
             }
             case FH_VAL_STRING: {
@@ -1570,7 +1593,10 @@ op_CALL: {
             goto rebind_frame;
         }
 
-        vm_error(vm, "call to non-function value");
+        /* Naming the type makes the common case readable: a `obj:method()`
+         * whose method the object (and its prototype chain) does not have
+         * reads as "call to non-function value (null)". */
+        vm_error(vm, "call to non-function value (%s)", fh_type_to_str(vm->prog, ra->type));
         goto user_err;
     }
 

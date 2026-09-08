@@ -167,6 +167,12 @@ void fh_free_expr_children(struct fh_p_expr *expr) {
             fh_free_expr_list(expr->data.func_call.arg_list);
             return;
 
+        case EXPR_METHOD_CALL:
+            fh_free_expr(expr->data.method_call.object);
+            fh_free_expr(expr->data.method_call.method);
+            fh_free_expr_list(expr->data.method_call.arg_list);
+            return;
+
         case EXPR_ARRAY_LIT:
             fh_free_expr_list(expr->data.array_lit.elem_list);
             return;
@@ -338,6 +344,15 @@ int fh_ast_visit_expr_nodes(struct fh_p_expr *expr, int (*visit)(struct fh_p_exp
             if ((ret = fh_ast_visit_expr_nodes(expr->data.func_call.func, visit, data)) != 0)
                 return ret;
             for (e = expr->data.func_call.arg_list; e != NULL; e = e->next) {
+                if ((ret = fh_ast_visit_expr_nodes(e, visit, data)) != 0)
+                    return ret;
+            }
+            return 0;
+
+        case EXPR_METHOD_CALL:
+            if ((ret = fh_ast_visit_expr_nodes(expr->data.method_call.object, visit, data)) != 0)
+                return ret;
+            for (e = expr->data.method_call.arg_list; e != NULL; e = e->next) {
                 if ((ret = fh_ast_visit_expr_nodes(e, visit, data)) != 0)
                     return ret;
             }

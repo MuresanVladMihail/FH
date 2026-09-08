@@ -2571,6 +2571,71 @@ static int fn_error(struct fh_program *prog, struct fh_value *ret, struct fh_val
     return fh_set_error(prog, "%s", buf);
 }
 
+/* setproto(map, proto_or_null) -- give `map` a prototype, and return `map`.
+ *
+ * A key that `map` does not have is then looked up in `proto`, and in its
+ * prototype in turn: the same job Lua gives `__index`, minus the metatable
+ * around it. The prototype lives in a slot on the map rather than under a
+ * reserved key, so it never shows up in next_key() or json_stringify() --
+ * an object should not serialize the class it was made from.
+ *
+ * What this buys is one shared copy of an object's methods instead of a
+ * fresh closure per method per instance.
+ */
+static int fn_setproto(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    if (check_n_args(prog, "setproto()", 2, n_args))
+        return -1;
+
+    if (args[0].type != FH_VAL_MAP)
+        return fh_set_error(prog, "setproto(): argument 1 must be a map, got %s",
+                            fh_type_to_str(prog, args[0].type));
+
+    struct fh_map *map = GET_OBJ_MAP(args[0].data.obj);
+
+    if (args[1].type == FH_VAL_NULL) {
+        map->proto = NULL;
+        *ret = args[0];
+        return 0;
+    }
+
+    if (args[1].type != FH_VAL_MAP)
+        return fh_set_error(prog, "setproto(): argument 2 must be a map or null, got %s",
+                            fh_type_to_str(prog, args[1].type));
+
+    struct fh_map *proto = GET_OBJ_MAP(args[1].data.obj);
+
+    /* Reject a cycle here rather than letting every later lookup walk into
+     * it. The existing chain is acyclic, so following it once is enough. */
+    for (struct fh_map *p = proto; p; p = p->proto) {
+        if (p == map)
+            return fh_set_error(prog, "setproto(): that would make a prototype cycle");
+    }
+
+    map->proto = proto;
+    *ret = args[0];
+    return 0;
+}
+
+/* getproto(map) -- the map's prototype, or null if it has none. */
+static int fn_getproto(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    if (check_n_args(prog, "getproto()", 1, n_args))
+        return -1;
+
+    if (args[0].type != FH_VAL_MAP)
+        return fh_set_error(prog, "getproto(): argument 1 must be a map, got %s",
+                            fh_type_to_str(prog, args[0].type));
+
+    struct fh_map *proto = GET_OBJ_MAP(args[0].data.obj)->proto;
+    if (!proto) {
+        *ret = fh_new_null();
+        return 0;
+    }
+
+    ret->type = FH_VAL_MAP;
+    ret->data.obj = proto;
+    return 0;
+}
+
 /* sort(array [, comparator]) -- sort an array in place, and return it.
  *
  * Without a comparator, numbers sort numerically and strings sort by
@@ -3305,6 +3370,8 @@ const struct fh_named_c_func fh_std_c_funcs[] = {
     DEF_FN(contains_key),
     DEF_FN(reserve),
     DEF_FN(sort),
+    DEF_FN(setproto),
+    DEF_FN(getproto),
     DEF_FN(delete),
 
     DEF_FN(json_parse),

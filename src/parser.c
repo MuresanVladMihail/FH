@@ -357,6 +357,17 @@ static int resolve_expr_stack(struct fh_parser *p, struct fh_src_loc loc,
     }
 }
 
+/* Is `c` one of the punctuation characters the caller asked us to stop at? */
+static bool punct_is_stop(const char *stop_chars, char c) {
+    if (!stop_chars)
+        return false;
+    for (const char *stop = stop_chars; *stop != '\0'; stop++) {
+        if (*stop == c)
+            return true;
+    }
+    return false;
+}
+
 static bool expr_is_lvalue(struct fh_p_expr *e) {
     if (!e) return false;
     return e->type == EXPR_VAR || e->type == EXPR_INDEX || e->type == EXPR_OPTIONAL_INDEX;
@@ -452,6 +463,73 @@ static struct fh_p_expr *parse_expr(struct fh_parser *p, bool consume_stop, char
                     fh_free_expr(func);
                     goto err;
                 }
+            }
+
+            push_opn(&opns, expr);
+            continue;
+        }
+        /* object:method(args)
+         *
+         * ':' is also the separator in a map literal, where the key is parsed
+         * with ':' as its stop char -- so a ':' that the caller is waiting
+         * for is left alone, and `{"a": 1}` still parses as a map. */
+        if (tok_is_punct(&tok, ':') && !expect_opn && !punct_is_stop(stop_chars, ':')) {
+            struct fh_token name_tok;
+            if (get_token(p, &name_tok) < 0)
+                goto err;
+            if (!tok_is_symbol(&name_tok)) {
+                fh_parse_error(p, name_tok.loc, "expected a method name after ':'");
+                goto err;
+            }
+
+            struct fh_p_expr *method = new_expr(p, name_tok.loc, EXPR_STRING, 0);
+            if (!method)
+                goto err;
+            const char *method_str = fh_get_token_symbol(p->ast, &name_tok);
+            method->data.str = fh_buf_add_string(&p->ast->string_pool,
+                                                 method_str, strlen(method_str));
+            if (method->data.str < 0) {
+                free(method);
+                fh_parse_error_oom(p, name_tok.loc);
+                goto err;
+            }
+
+            struct fh_token paren_tok;
+            if (get_token(p, &paren_tok) < 0) {
+                fh_free_expr(method);
+                goto err;
+            }
+            if (!tok_is_punct(&paren_tok, '(')) {
+                fh_free_expr(method);
+                fh_parse_error(p, paren_tok.loc,
+                               "expected '(' -- ':' is only for calling a method, use '.' to read a field");
+                goto err;
+            }
+
+            if (resolve_expr_stack(p, tok.loc, &opns, &oprs, FUNC_CALL_PREC) < 0) {
+                fh_free_expr(method);
+                goto err;
+            }
+            struct fh_p_expr *object = pop_opn(&opns);
+            if (!object) {
+                fh_free_expr(method);
+                fh_parse_error(p, tok.loc, "syntax error (no object on stack!)");
+                goto err;
+            }
+
+            struct fh_p_expr *expr = new_expr(p, tok.loc, EXPR_METHOD_CALL, 0);
+            if (!expr) {
+                fh_free_expr(object);
+                fh_free_expr(method);
+                goto err;
+            }
+            expr->data.method_call.object = object;
+            expr->data.method_call.method = method;
+            expr->data.method_call.arg_list = NULL;
+
+            if (parse_expr_list(p, &expr->data.method_call.arg_list) < 0) {
+                fh_free_expr(expr);
+                goto err;
             }
 
             push_opn(&opns, expr);

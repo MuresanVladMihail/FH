@@ -47,6 +47,12 @@ struct fh_map {
     struct fh_map_entry *entries;
     uint32_t len;
     uint32_t cap;
+
+    /* Prototype consulted when a key is missing -- FH's take on Lua's
+     * __index. It is a slot rather than an entry in the map itself, so it
+     * stays out of next_key() iteration and out of json_stringify(): an
+     * object should not serialize its class. Set with setproto(). */
+    struct fh_map *proto;
 };
 
 struct fh_func_def {
