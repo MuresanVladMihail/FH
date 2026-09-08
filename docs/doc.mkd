@@ -490,8 +490,29 @@ len("hello");        # 5
 | `delete(container, key_or_index)` | Removes an entry from an array (by index) or map (by key) and returns the removed value. |
 | `reset(container)` | Empties an array or map in place (keeps the underlying allocation, avoiding a realloc on reuse). |
 | `reserve(container, capacity)` | Pre-allocates capacity in an array or map and returns it. |
+| `sort(array[, comparator])` | Sorts `array` **in place** and returns it. Without a comparator, numbers sort numerically and strings by `strcmp`; mixing kinds is an error. With one, `comparator(a, b)` is asked whether `a` comes before `b` (Lua's `table.sort` convention). The sort is **stable**, so equal elements keep their original order. |
 | `docstring(fn)` | Returns the docstring of a closure (`fn f() : "doc" {}`), or `""` if it has none. Only works on closures. |
 | `getversion()` | Returns the FH version string (e.g. `"1.0.rc6"`). |
+
+**Sorting.** `sort` is the only built-in that calls back into your script, so
+it is worth knowing what it guarantees:
+
+```
+sort(scores);                                   # ascending, in place
+sort(names);                                    # strings, by strcmp
+sort(people, fn(a, b) { return a.age < b.age; });   # by a field
+sort(scores, fn(a, b) { return a > b; });       # descending
+```
+
+- It sorts **in place** and returns the same array, so `let top = sort(xs)[0];`
+  works and `xs` is sorted afterwards too.
+- It is **stable**: sorting by one field and then another gives the ordering
+  you would expect.
+- The comparator answers "does `a` come before `b`?" — the same convention as
+  Lua's `table.sort`. It must not resize the array; if it does, the sort stops
+  with an error rather than shuffling indices that no longer mean anything.
+- An error raised inside the comparator propagates out of `sort` and is
+  catchable with `pcall`.
 | `error(x)` | Aborts the script with `x` as the message. A string is used as-is; any other value is rendered into one. |
 | `pcall(f[, args...])` | Calls `f` with `args`, catching an error instead of aborting. Returns a map: `{ok: true, value: ...}` or `{ok: false, error: "...", file, line, col, traceback}`. See 1.10. |
 | `assert(cond[, msg])` | Raises an error if `cond` is falsy; `msg` is included in the error if given. |

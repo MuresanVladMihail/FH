@@ -2571,6 +2571,221 @@ static int fn_error(struct fh_program *prog, struct fh_value *ret, struct fh_val
     return fh_set_error(prog, "%s", buf);
 }
 
+/* sort(array [, comparator]) -- sort an array in place, and return it.
+ *
+ * Without a comparator, numbers sort numerically and strings sort by
+ * strcmp(); a mix of the two (or anything else) is an error, because there
+ * is no defensible order between a number and a map. With one,
+ * `comparator(a, b)` is asked whether a must come *before* b, which is Lua's
+ * table.sort convention.
+ *
+ * Two properties are worth the machinery below.
+ *
+ * It is a stable bottom-up merge sort, which is what a script actually wants
+ * when it sorts by one field after another. Merge sort also costs about half
+ * the comparisons of a heapsort, and every comparison here can be a full VM
+ * call -- that is the whole cost of the operation.
+ *
+ * And it sorts a permutation of *indices*, not the values: the values never
+ * leave arr->items, which the collector reaches through the caller's
+ * register. A merge sort that moved fh_values through a malloc'd scratch
+ * buffer would be holding the only reference to them somewhere the GC does
+ * not walk, and a comparator that allocates would collect them.
+ */
+
+struct sort_ctx {
+    struct fh_program *prog;
+    struct fh_array *arr;
+    uint32_t len; /* the length the sort started with */
+    struct fh_value comparator; /* null when there is none */
+    bool has_comparator;
+};
+
+/* Ordering used when no comparator was given. Returns 1 for a < b, 0 for
+ * not, -1 for "these two cannot be compared" (with the error set). */
+static int sort_default_less(struct sort_ctx *ctx, const struct fh_value *a, const struct fh_value *b,
+                             int *out_less) {
+    if (fh_is_number(a) && fh_is_number(b)) {
+        if (fh_is_integer(a) && fh_is_integer(b))
+            *out_less = (a->data.i < b->data.i);
+        else {
+            const double da = fh_is_integer(a) ? (double) a->data.i : a->data.num;
+            const double db = fh_is_integer(b) ? (double) b->data.i : b->data.num;
+            *out_less = (da < db);
+        }
+        return 0;
+    }
+
+    if (fh_is_string(a) && fh_is_string(b)) {
+        const char *sa = GET_OBJ_STRING_DATA(a->data.obj);
+        const char *sb = GET_OBJ_STRING_DATA(b->data.obj);
+        *out_less = (strcmp(sa, sb) < 0);
+        return 0;
+    }
+
+    return fh_set_error(ctx->prog, "sort(): don't know how to order %s against %s "
+                        "(pass a comparator function)",
+                        fh_type_to_str(ctx->prog, a->type),
+                        fh_type_to_str(ctx->prog, b->type));
+}
+
+/* Is items[ia] < items[ib]? 1 yes, 0 no, -1 error. */
+static int sort_less(struct sort_ctx *ctx, uint32_t ia, uint32_t ib, int *out_less) {
+    /* arr->items can have moved since the last comparison: a comparator is
+     * free to append to the array. Re-read it every time. */
+    const struct fh_value *items = ctx->arr->items;
+    const struct fh_value a = items[ia];
+    const struct fh_value b = items[ib];
+
+    if (!ctx->has_comparator)
+        return sort_default_less(ctx, &a, &b, out_less);
+
+    struct fh_value cmp_args[2] = {a, b};
+    struct fh_value cmp_ret = fh_new_null();
+    int r;
+
+    if (ctx->comparator.type == FH_VAL_CLOSURE) {
+        r = fh_call_vm_function(&ctx->prog->vm, GET_OBJ_CLOSURE(ctx->comparator.data.obj),
+                                cmp_args, 2, &cmp_ret);
+    } else {
+        r = ctx->comparator.data.c_func(ctx->prog, &cmp_ret, cmp_args, 2);
+    }
+    if (r < 0)
+        return -1;
+
+    /* The comparator ran arbitrary script. If it resized the array, every
+     * index the sort is carrying is now meaningless -- stop rather than
+     * shuffle whatever is left. */
+    if (ctx->arr->len != ctx->len)
+        return fh_set_error(ctx->prog, "sort(): the array was resized while it was being sorted");
+
+    *out_less = fh_is_truthy(&cmp_ret) ? 1 : 0;
+    return 0;
+}
+
+/* One merge pass over [lo, mid) and [mid, hi) of src, into dst. */
+static int sort_merge(struct sort_ctx *ctx, const uint32_t *src, uint32_t *dst,
+                      uint32_t lo, uint32_t mid, uint32_t hi) {
+    uint32_t i = lo, j = mid, k = lo;
+
+    while (i < mid && j < hi) {
+        int less = 0;
+        /* Ask whether the *right* element is strictly smaller: when it is
+         * not, the left one goes first, which is what keeps equal elements
+         * in their original order. */
+        if (sort_less(ctx, src[j], src[i], &less) < 0)
+            return -1;
+        dst[k++] = less ? src[j++] : src[i++];
+    }
+    while (i < mid) dst[k++] = src[i++];
+    while (j < hi) dst[k++] = src[j++];
+    return 0;
+}
+
+static int fn_sort(struct fh_program *prog, struct fh_value *ret, struct fh_value *args, int n_args) {
+    if (n_args < 1 || n_args > 2)
+        return fh_set_error(prog, "sort(): expected 1 or 2 arguments (array [, comparator])");
+
+    if (args[0].type != FH_VAL_ARRAY)
+        return fh_set_error(prog, "sort(): argument 1 must be an array, got %s",
+                            fh_type_to_str(prog, args[0].type));
+
+    struct sort_ctx ctx;
+    ctx.prog = prog;
+    ctx.arr = GET_OBJ_ARRAY(args[0].data.obj);
+    ctx.len = ctx.arr->len;
+    ctx.comparator = fh_new_null();
+    ctx.has_comparator = false;
+
+    if (n_args == 2 && args[1].type != FH_VAL_NULL) {
+        if (args[1].type != FH_VAL_CLOSURE && args[1].type != FH_VAL_C_FUNC)
+            return fh_set_error(prog, "sort(): argument 2 must be a function, got %s",
+                                fh_type_to_str(prog, args[1].type));
+        ctx.comparator = args[1];
+        ctx.has_comparator = true;
+    }
+
+    /* args[] points into the VM value stack, which a comparator call can
+     * realloc out from under us; everything read from it is copied above.
+     * The array itself stays a GC root through the caller's register. */
+    const struct fh_value arr_val = args[0];
+    const uint32_t n = ctx.len;
+
+    *ret = arr_val;
+    if (n < 2)
+        return 0;
+
+    if (n > (uint32_t) (SIZE_MAX / sizeof(uint32_t)) / 2)
+        return fh_set_error(prog, "sort(): array is too large to sort");
+
+    uint32_t *idx = malloc((size_t) n * sizeof(uint32_t));
+    uint32_t *buf = malloc((size_t) n * sizeof(uint32_t));
+    if (!idx || !buf) {
+        free(idx);
+        free(buf);
+        return fh_set_error(prog, "sort(): out of memory");
+    }
+    for (uint32_t i = 0; i < n; i++)
+        idx[i] = i;
+
+    /* A comparator can leave vm->pc pointing into its own function; the
+     * traceback for a later error is rendered from it. Put it back. */
+    uint32_t *saved_pc = prog->vm.pc;
+
+    int failed = 0;
+    for (uint32_t width = 1; width < n && !failed; width *= 2) {
+        for (uint32_t lo = 0; lo < n; lo += 2 * width) {
+            const uint32_t mid = (lo + width < n) ? lo + width : n;
+            const uint32_t hi = (lo + 2 * width < n) ? lo + 2 * width : n;
+            if (sort_merge(&ctx, idx, buf, lo, mid, hi) < 0) {
+                failed = 1;
+                break;
+            }
+        }
+        if (failed)
+            break;
+        uint32_t *swap = idx;
+        idx = buf;
+        buf = swap;
+    }
+
+    prog->vm.pc = saved_pc;
+
+    if (failed) {
+        free(idx);
+        free(buf);
+        return -1;
+    }
+
+    /* Apply the permutation in place, cycle by cycle: idx[i] is the slot the
+     * value for position i is currently in. Nothing here allocates or calls
+     * back into the VM, so the one value held in `tmp` cannot be collected
+     * while it is out of the array. */
+    struct fh_value *items = ctx.arr->items;
+    for (uint32_t i = 0; i < n; i++) {
+        if (idx[i] == i)
+            continue;
+
+        const struct fh_value tmp = items[i];
+        uint32_t j = i;
+        for (;;) {
+            const uint32_t k = idx[j];
+            idx[j] = j;
+            if (k == i)
+                break;
+            items[j] = items[k];
+            j = k;
+        }
+        items[j] = tmp;
+    }
+
+    free(idx);
+    free(buf);
+
+    *ret = arr_val;
+    return 0;
+}
+
 /* pcall(f [, args...]) -- call f, and come back with the error instead of dying.
  *
  * FH has no try/catch and no unwinding: an error is a -1 all the way up, so
@@ -3089,6 +3304,7 @@ const struct fh_named_c_func fh_std_c_funcs[] = {
     DEF_FN(next_key),
     DEF_FN(contains_key),
     DEF_FN(reserve),
+    DEF_FN(sort),
     DEF_FN(delete),
 
     DEF_FN(json_parse),
