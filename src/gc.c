@@ -291,6 +291,107 @@ static void mark_container_children(struct fh_gc_state *gc) {
     }
 }
 
+#ifdef FH_GC_DEBUG
+/* Root verification, compiled in only by `make TARGETS=gcdebug`.
+ *
+ * A dangling root is the collector's worst failure mode: nothing goes wrong
+ * at the moment the mistake is made, and the crash arrives later, in
+ * unrelated code, only when the heap happens to be laid out badly. That
+ * makes such a bug flaky to reproduce and nearly impossible to pin a test
+ * on -- the stack-bound bug this pass was written for reported corruption
+ * on roughly one release run in five.
+ *
+ * This walks every root before marking and checks that the object it names
+ * is still on prog->objects, turning that into a deterministic, labelled
+ * report on stderr. It is O(roots * objects) and belongs nowhere near a
+ * release build.
+ */
+static bool gc_dbg_owns(const struct fh_program *prog, const union fh_object *o) {
+    for (const union fh_object *cur = prog->objects; cur; cur = cur->header.next)
+        if (cur == o) return true;
+    return false;
+}
+
+static bool gc_dbg_is_live(const struct fh_program *prog, const union fh_object *o) {
+    if (gc_dbg_owns(prog, o))
+        return true;
+
+    /* eval() runs its code in a separate fh_program and hands the result
+     * back across, so a perfectly live value here can be owned by another
+     * program's heap. Those programs are kept alive for the process's
+     * lifetime in fh_programs_vector, so an object in one of them is not
+     * dangling -- just not ours. */
+    if (fh_programs_vector) {
+        for (size_t i = 0; i < fh_programs_vector->length; i++) {
+            const struct fh_program *other = fh_programs_vector->data[i];
+            if (other && other != prog && gc_dbg_owns(other, o))
+                return true;
+        }
+    }
+    return false;
+}
+
+static void gc_dbg_check(const struct fh_program *prog, const struct fh_value *v,
+                         const char *where, int idx) {
+    if (!v || !VAL_IS_OBJECT(v))
+        return;
+    if (!gc_dbg_is_live(prog, (union fh_object *) v->data.obj))
+        fprintf(stderr, "GC ERROR: dangling root %s[%d] -> %p (value type %d)\n",
+                where, idx, (void *) v->data.obj, (int) v->type);
+}
+
+static void gc_dbg_verify_roots(struct fh_program *prog) {
+    const char *key;
+
+    map_iter_t var_iter = map_iter(&prog->global_vars_map);
+    while ((key = map_next(&prog->global_vars_map, &var_iter)))
+        gc_dbg_check(prog, *(struct fh_value **) map_get(&prog->global_vars_map, key),
+                     "global_var", 0);
+
+    map_iter_t fn_iter = map_iter(&prog->global_funcs_map);
+    while ((key = map_next(&prog->global_funcs_map, &fn_iter))) {
+        struct fh_closure *c = *(struct fh_closure **) map_get(&prog->global_funcs_map, key);
+        if (c && !gc_dbg_is_live(prog, (union fh_object *) c))
+            fprintf(stderr, "GC ERROR: dangling root global_func '%s' -> %p\n", key, (void *) c);
+    }
+
+    if (prog->globals_init && !gc_dbg_is_live(prog, (union fh_object *) prog->globals_init))
+        fprintf(stderr, "GC ERROR: dangling root globals_init -> %p\n", (void *) prog->globals_init);
+
+    int bound = 0;
+    for (int i = call_frame_stack_size(&prog->vm.call_stack) - 1; i >= 0; --i) {
+        const struct fh_vm_call_frame *f = call_frame_stack_item(&prog->vm.call_stack, i);
+        if (!f) continue;
+        if (f->stack_top > bound) bound = f->stack_top;
+        if (f->closure && !gc_dbg_is_live(prog, (union fh_object *) f->closure))
+            fprintf(stderr, "GC ERROR: dangling root frame[%d].closure -> %p\n",
+                    i, (void *) f->closure);
+    }
+    for (int i = 0; i < bound; i++)
+        gc_dbg_check(prog, &prog->vm.stack[i], "vm_stack", i);
+
+    for (size_t i = 0; i < prog->pinned_objs.length; i++) {
+        if (!gc_dbg_is_live(prog, (union fh_object *) prog->pinned_objs.data[i]))
+            fprintf(stderr, "GC ERROR: dangling root pinned[%d] -> %p\n",
+                    (int) i, prog->pinned_objs.data[i]);
+    }
+
+    for (size_t i = 0; i < prog->c_vals.length; i++)
+        gc_dbg_check(prog, (struct fh_value *) prog->c_vals.data[i], "c_vals", (int) i);
+
+    for (const struct fh_upval *uv = prog->vm.open_upvals; uv; uv = uv->data.next) {
+        if (!gc_dbg_is_live(prog, (const union fh_object *) uv)) {
+            fprintf(stderr, "GC ERROR: dangling root open_upval -> %p\n", (const void *) uv);
+            break;
+        }
+        gc_dbg_check(prog, uv->val, "open_upval", 0);
+    }
+
+    for (int i = 0; i < 256; i++)
+        gc_dbg_check(prog, &prog->vm.char_cache[i], "char_cache", i);
+}
+#endif /* FH_GC_DEBUG */
+
 static void mark_roots(struct fh_gc_state *gc, struct fh_program *prog) {
     // mark global functions
     debug_log("***** marking global functions\n");
@@ -312,14 +413,31 @@ static void mark_roots(struct fh_gc_state *gc, struct fh_program *prog) {
     }
 
     // mark stack
-    struct fh_vm_call_frame *cur_frame = call_frame_stack_top(&prog->vm.call_stack);
-    if (cur_frame) {
-        int stack_size = cur_frame->stack_top;
-        if (stack_size < 0) stack_size = 0;
-
+    //
+    // The bound is the *highest* stack_top of any live frame, not the top
+    // frame's. A frame's stack_top is not monotonic with depth: a C-call
+    // frame's is base + n_args, which for a no-argument builtin sits below
+    // every register its caller is still using. Marking only to the top
+    // frame's bound therefore freed the caller's live locals whenever a
+    // collection happened while a C function was running -- and since
+    // fh_make_object() is what triggers a collection, that is any builtin
+    // that allocates. The stale slots left behind then crashed the *next*
+    // mark, walking objects that had already been swept.
+    //
+    // Every slot below this bound belongs to some live frame's register
+    // window (a callee's window always starts inside its caller's, so the
+    // windows leave no gaps), and prepare_call() initialises every window it
+    // opens -- so nothing below the bound is uninitialised memory.
+    int stack_size = 0;
+    for (int i = call_frame_stack_size(&prog->vm.call_stack) - 1; i >= 0; --i) {
+        const struct fh_vm_call_frame *f = call_frame_stack_item(&prog->vm.call_stack, i);
+        if (f && f->stack_top > stack_size)
+            stack_size = f->stack_top;
+    }
+    if (stack_size > 0) {
         const struct fh_value *stack = prog->vm.stack;
         debug_log1("***** marking %d stack values\n", stack_size);
-        for (size_t i = 0; i < stack_size; i++)
+        for (int i = 0; i < stack_size; i++)
             MARK_VALUE(gc, &stack[i]);
     }
 
@@ -364,6 +482,9 @@ static void mark_roots(struct fh_gc_state *gc, struct fh_program *prog) {
 }
 
 static void mark(struct fh_gc_state *gc, struct fh_program *prog) {
+#ifdef FH_GC_DEBUG
+    gc_dbg_verify_roots(prog);
+#endif
     mark_roots(gc, prog);
 
     debug_log("***** marking container children\n");
@@ -375,6 +496,16 @@ void fh_collect_garbage(struct fh_program *prog) {
         return;
     }
 
+    /* Sweeping a c_obj runs the host's free callback, which is arbitrary C
+     * code; if it ever allocates, fh_make_object() can ask for a collection
+     * while this one is still walking prog->objects. Re-entering here would
+     * sweep a half-marked heap. Refuse instead -- that allocation simply
+     * goes to malloc, and the next one collects. */
+    if (prog->gc_running) {
+        return;
+    }
+    prog->gc_running = true;
+
     struct fh_gc_state gc = {
         .container_list = NULL,
     };
@@ -383,6 +514,8 @@ void fh_collect_garbage(struct fh_program *prog) {
     mark(&gc, prog);
     sweep(&gc, prog);
     debug_log("== GC DONE ======================\n");
+
+    prog->gc_running = false;
 
 #ifdef COUNT_MEM_USAGE
     printf("gc used:     %zu\n", gc.used);

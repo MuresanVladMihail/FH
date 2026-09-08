@@ -54,8 +54,8 @@ int fh_reserve_array_capacity(struct fh_program *prog, struct fh_array *arr, uin
 
 struct fh_value *fh_grow_array_object_uninit(struct fh_program *prog, struct fh_array *arr, const uint32_t num_items) {
     const uint32_t len = arr->len;
-    if (len < arr->cap) {
-        arr->len = len + 1;
+    if ((size_t) len + num_items <= arr->cap) {
+        arr->len = len + num_items;
         return &arr->items[len];
     }
 

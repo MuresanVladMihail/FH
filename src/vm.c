@@ -1015,7 +1015,13 @@ op_SETEL: {
 
             struct fh_array *arr = GET_OBJ_ARRAY(ra->data.obj);
             if (idx >= arr->len) {
-                fh_grow_array_object(vm->prog, arr, idx + 1);
+                /* Extend *to* idx+1. fh_grow_array_object() appends its
+                 * argument, so passing idx+1 grew the array by that much
+                 * every time: `let a = [1,2,3]; a[3] = 4;` left len at 7,
+                 * and the documented `items[count] = v` push idiom grew
+                 * geometrically while len(items) lied about the contents. */
+                if (!fh_grow_array_object(vm->prog, arr, (uint32_t) (idx + 1) - arr->len))
+                    goto err;   /* out of memory -- do not write past the end */
             }
             arr->items[idx] = *rc;
 

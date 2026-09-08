@@ -78,6 +78,43 @@ The language follows a classic interpreter architecture:
 - Configurable threshold via `gc_frequency()` function
 - Can be paused/resumed with `gc_pause()`
 - Force collection with `gc()`
+- Re-entry is refused (`prog->gc_running`): sweeping a `c_obj` runs the
+  host's free callback, and if that allocates it must not start a second
+  collection over a half-marked heap.
+
+*Roots*, all in `mark_roots()`. Miss one and nothing goes wrong until much
+later, in unrelated code, on maybe one run in five — so treat this list as
+the invariant it is:
+- `global_funcs_map`, `global_vars_map`, `pinned_objs`, `c_vals`,
+  `open_upvals`, and `vm.char_cache` (pinned at startup).
+- `prog->globals_init`, the compiled `<globals>` closure between compiling
+  and running a chunk's initializers.
+- **Every live call frame's `closure`.** A running closure is usually
+  reachable some other way (a callee sits in the caller's register, a named
+  function is in `global_funcs_map`), but `fh_call_vm_function()` puts its
+  closure only in the frame, so a caller holding no other reference has the
+  running function's own constants collected under it.
+- **The VM stack, up to the highest `stack_top` of *any* live frame** — not
+  the top frame's. `stack_top` is not monotonic with depth: a C-call frame's
+  is `base + n_args`, which for a no-argument builtin sits below every
+  register its caller is still using. Using the top frame's bound freed the
+  caller's live locals on any collection triggered from inside an allocating
+  builtin, and the stale slots then crashed the *next* collection.
+
+*Testing the collector.* `make TARGETS=gcdebug` builds with `-DFH_GC_DEBUG`
+(asan plus a root verifier that checks, before every mark, that each root
+still points at a live object). It turns "segfaults one run in five" into a
+deterministic labelled report on stderr. `run_tests.sh` fails any test whose
+output contains `GC ERROR` or `**** ERROR`, so a test cannot pass by printing
+"ok" on a heap it has already corrupted. `tests/test_gc_stress.fh` leans on
+the collector from every direction and pins the regressions above; run the
+whole suite under `gcdebug` after touching `gc.c`, `vm.c` or `value.c`.
+
+Note that `eval()` runs its code in a *separate* `fh_program` and hands the
+result back across, so a live value can legitimately be owned by another
+program's heap (kept alive for the process lifetime in
+`fh_programs_vector`). The verifier knows about this; new root checks must
+too.
 
 **Type Hints & Optimizations** (`src/compiler.c`)
 - Compiler tracks type hints (H_INT, H_FLOAT, H_UNKNOWN) for registers

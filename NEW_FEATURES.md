@@ -1,6 +1,6 @@
 # New Features Implementation Summary
 
-## ✅ Completed Features (11/11)
+## ✅ Completed Features (12/12)
 
 ### 1. String Interpolation
 
@@ -360,6 +360,71 @@ below segfaults):
 
 ---
 
+### 12. Collector fixes, and a way to test the collector
+
+Three bugs, found by leaning on the GC rather than by reading it.
+
+**`mark_roots()` marked too little of the VM stack.** It used the *top*
+frame's `stack_top`. That bound is not monotonic with depth: a C-call frame's
+`stack_top` is `base + n_args`, which for a no-argument builtin sits below
+every register its caller is still using. So any collection triggered while a
+C function was on top — and `fh_make_object()` is what triggers collections,
+so that is any builtin that allocates — swept objects the caller's live
+registers still pointed at. The stale slots then crashed the *next*
+collection, walking objects that had already been freed. The bound is now the
+highest `stack_top` of any live frame; every slot below it belongs to some
+frame's register window, and `prepare_call()` initialises every window it
+opens.
+
+```fh
+let junk = [];
+let i = 0;
+while (i < 3000) {
+    append(junk, {"a": "str" + i, "b": [i, i + 1]});
+    if ((i % 100) == 0) { junk = []; gc(); }
+    i = i + 1;
+}
+# before: "GC ERROR: marking invalid object type -701800423", then a segfault
+```
+
+**`a[i] = v` past the end grew the array by `i+1` instead of to `i+1`.**
+`fh_grow_array_object()` appends its argument, so `let a = [1,2,3]; a[3] = 4;`
+left `len(a)` at 7, and the `items[count] = v` push idiom the manual
+documents grew the array geometrically while `len()` lied about its contents.
+The out-of-memory return was also unchecked, so a failed grow wrote past the
+end. Both fixed, along with `fh_grow_array_object_uninit()`'s fast path,
+which ignored `num_items` and always bumped the length by one.
+
+**A collection could re-enter itself.** Sweeping a `c_obj` runs the host's
+free callback; if that ever allocates, `fh_make_object()` could start a
+second collection over a half-marked heap. `prog->gc_running` refuses it.
+
+**And a way to catch the next one.** A dangling root produces no symptom
+where the mistake is: the first stack-bound bug reported corruption on
+roughly one release run in five, which is not something a test can be pinned
+to. `make TARGETS=gcdebug` builds with asan plus a root verifier that checks,
+before every mark, that each root still points at a live object — turning
+that into a deterministic labelled report:
+
+```
+$ make TARGETS=gcdebug && ./fh tests/test_gc_stress.fh
+GC ERROR: dangling root vm_stack[5] -> 0x5586a2b1c240 (value type 6)
+```
+
+With the bug present that fires on every run; with it fixed, the whole suite
+is clean. `run_tests.sh` now fails any test whose output carries `GC ERROR`
+or `**** ERROR`, so a test can no longer pass by printing "ok" on a heap it
+has already corrupted — which is exactly what the array and stack-bound
+tests did before. `tests/test_gc_stress.fh` covers locals live across
+allocating builtins, closures outliving their frames, deep recursion, map
+growth and deletion, array growth, reachable and unreachable cycles, `pcall`
+under pressure, and `sort()` calling script back from inside a C frame.
+
+**Files Modified:** `src/gc.c`, `src/vm.c`, `src/array.c`, `src/program.c`,
+`src/program.h`, `Makefile`, `run_tests.sh`, `CLAUDE.md`
+
+---
+
 ## All Features Completed! 🎉
 
 ---
@@ -380,6 +445,14 @@ Features 8-10 have their own suites:
 ./fh tests/test_oop_proto.fh
 ./fh tests/test_global_init.fh
 ./fh tests/test_global_init_gc.fh
+./fh tests/test_gc_stress.fh
+```
+
+The collector has a build of its own for testing:
+
+```bash
+make TARGETS=gcdebug     # asan + a root verifier, see feature 12
+./run_tests.sh
 ```
 
 Full test suite (all passing):

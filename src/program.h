@@ -41,6 +41,7 @@ struct fh_program {
     size_t gc_live_bytes;    // bytes held by live objects (object structs only)
     size_t gc_collect_at;    // minimum bytes between collections (user-settable)
     bool gc_isPaused;
+    bool gc_running;         // guards against a collection inside a collection
     int alive_objects;
     struct fh_value null_value;
     struct fh_parser parser;
