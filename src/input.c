@@ -19,12 +19,13 @@ struct fh_input {
 
 struct fh_input *fh_new_input(const char *filename, void *user_data,
                               struct fh_input_funcs *funcs) {
-    struct fh_input *in = malloc(sizeof(struct fh_input) + strlen(filename) + 1);
+    size_t filename_len = strlen(filename);
+    struct fh_input *in = malloc(sizeof(struct fh_input) + filename_len + 1);
     if (!in)
         return NULL;
     in->user_data = user_data;
     in->funcs = funcs;
-    strcpy((char *)in + sizeof(struct fh_input), filename);
+    memcpy((char *)in + sizeof(struct fh_input), filename, filename_len + 1);
     return in;
 }
 
