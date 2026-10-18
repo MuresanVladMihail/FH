@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1
+
+# Stage 1: Builder
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS builder
+
+# Install build dependencies only
+RUN apk add --no-cache build-base
+
+WORKDIR /app
+
+# Copy only what the build needs so unrelated changes keep the cache warm
+COPY Makefile ./
+COPY src ./src
+
+# Build the release target and strip debug symbols
+RUN make -j"$(nproc)" TARGETS=release && strip fh
+
+# Stage 2: Runner
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+
+LABEL org.opencontainers.image.title="fh" \
+      org.opencontainers.image.source="https://github.com/MuresanVladMihail/FH"
+
+# Unprivileged user to run the binary and tests
+RUN addgroup -S fh && adduser -S -G fh -H -h /app fh
+
+WORKDIR /app
+
+COPY --from=builder --chown=fh:fh /app/fh ./
+COPY --chown=fh:fh run_tests_release.sh ./
+COPY --chown=fh:fh tests ./tests
+
+USER fh
+
+CMD ["./run_tests_release.sh"]
